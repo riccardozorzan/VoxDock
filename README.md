@@ -415,7 +415,7 @@ one request; `process_txt.py` already batches by default.
   `torch.cuda.memory_allocated()` / `max_memory_allocated()` (this process),
   exactly as the spec requests.
 * **FFmpeg stitching** uses `-c copy` over format-consistent PCM_16 chunks, so it
-  is lossless; a small silence gap (`--gap`, default 0.12 s) is inserted between
+  is lossless; a small silence gap (`--gap`, default 0.30 s) is inserted between
   chunks to avoid clipped prosody at the seams.
 * **`benchmark_test.py`** reports the RTF in both conventions
   (`generation/audio` for the `< 0.5` target and `audio/generation` for the spec's
