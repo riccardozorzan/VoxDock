@@ -1,7 +1,10 @@
-name: local-tts-docker
+# Project identity lives in app/__init__.py (VoxDock). The values below are
+# NOT duplicated by hand - they are the inline defaults Compose falls back to,
+# and scripts/check_identity.py asserts they match app/__init__.py.
+name: ${VOXDOCK_COMPOSE_PROJECT:-voxdock}
 
 # ============================================================================
-#  GPU-accelerated dots.tts service.
+#  VoxDock — GPU-accelerated dots.tts service.
 #     docker compose up -d --build          # start (first build downloads ~8 GB)
 #     docker compose exec tts python scripts/benchmark_test.py
 #
@@ -9,14 +12,18 @@ name: local-tts-docker
 #  interpolation below, so `.env.example` -> `.env` is all the configuration
 #  you normally need. The persistent `hf_cache` volume stops the ~4.4 GB of
 #  checkpoint weights from being re-downloaded on every rebuild.
+#
+#  Identity (image / container / project name) is declared in app/__init__.py.
+#  The defaults below mirror it; `python scripts/check_identity.py` fails if
+#  the two ever drift apart.
 # ============================================================================
 services:
   tts:
     build:
       context: .
       dockerfile: Dockerfile
-    image: dots-tts:latest
-    container_name: dots-tts
+    image: ${VOXDOCK_IMAGE:-voxdock-tts}:latest
+    container_name: ${VOXDOCK_CONTAINER:-voxdock-tts}
     restart: unless-stopped
 
     ports:
@@ -91,4 +98,8 @@ services:
 
 volumes:
   hf_cache:
-    name: local_tts_hf_cache
+    # Kept as `local_tts_hf_cache` on purpose - Docker cannot rename a volume,
+    # and this one holds ~4.4 GB of checkpoint weights. Renaming it would
+    # orphan the cache and force a full re-download. See HF_CACHE_VOLUME in
+    # app/__init__.py.
+    name: ${VOXDOCK_HF_CACHE_VOLUME:-local_tts_hf_cache}

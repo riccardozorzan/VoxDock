@@ -19,7 +19,9 @@ from typing import Any, Iterator, Optional
 
 from app.config import settings
 
-logger = logging.getLogger("dots_tts.utils")
+from app import LOG_NAMESPACE
+
+logger = logging.getLogger(f"{LOG_NAMESPACE}.utils")
 
 __all__ = [
     "now_iso",

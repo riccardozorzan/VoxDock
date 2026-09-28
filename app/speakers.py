@@ -27,7 +27,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-logger = logging.getLogger("dots_tts.api")
+from app import LOG_NAMESPACE
+
+logger = logging.getLogger(f"{LOG_NAMESPACE}.api")
 
 __all__ = ["SpeakerRecord", "SpeakerRegistry"]
 

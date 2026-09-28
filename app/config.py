@@ -25,6 +25,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
+from app import LOG_NAMESPACE, __description__, __title__, __version__
+
 __all__ = [
     "PROJECT_ROOT",
     "DATA_DIR",
@@ -38,7 +40,7 @@ __all__ = [
     "load_best_config",
 ]
 
-logger = logging.getLogger("dots_tts.api")
+logger = logging.getLogger(f"{LOG_NAMESPACE}.api")
 
 
 # --------------------------------------------------------------------------- #
@@ -340,10 +342,17 @@ class ModelSettings:
 
 @dataclass(frozen=True)
 class APISettings:
-    """FastAPI server / HTTP client settings."""
+    """FastAPI server / HTTP client settings.
 
-    title: str = "dots.tts Local TTS Service"
-    version: str = "2.0.0"
+    The identity fields default to the package metadata in :mod:`app`
+    (``VoxDock`` / ``voxdock-tts``), so the Docker image name, the FastAPI
+    ``/docs`` title and this module cannot drift apart. Override with
+    ``TTS_API_TITLE`` / ``TTS_API_VERSION`` when running a private fork.
+    """
+
+    title: str = __title__
+    version: str = __version__
+    description: str = __description__
     host: str = "0.0.0.0"
     port: int = 8000
     api_url: str = "http://localhost:8000"
@@ -358,6 +367,7 @@ class APISettings:
         return cls(
             title=_str("TTS_API_TITLE", cls.title),
             version=_str("TTS_API_VERSION", cls.version),
+            description=_str("TTS_API_DESCRIPTION", cls.description),
             host=_str("TTS_HOST", cls.host),
             port=_int("TTS_PORT", cls.port),
             api_url=_str("TTS_API_URL", cls.api_url).rstrip("/"),

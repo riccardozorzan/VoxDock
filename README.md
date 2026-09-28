@@ -1,4 +1,4 @@
-# Local High-Fidelity TTS — dots.tts + FastAPI + Docker (v2)
+# VoxDock — containerised high-fidelity local TTS
 
 Containerised, GPU-accelerated text-to-speech with **continuation voice cloning**
 on a laptop RTX 4050 (6 GB). Nothing is installed on the host except Docker.
@@ -8,8 +8,6 @@ on a laptop RTX 4050 (6 GB). Nothing is installed on the host except Docker.
 * **Service** — FastAPI `POST /v1/audio/speech` (raw `audio/wav`) + `GET /health`
   with live VRAM telemetry.
 * **Pipeline** — `clean_audio.py` → `process_txt.py` → `benchmark_test.py`.
-* **Status** — see [`TODO/todo-tts-agent-v4.md`](TODO/todo-tts-agent-v4.md) for
-  what is done, where each artefact lives, and what is still open.
 
 ---
 
@@ -24,17 +22,24 @@ docker compose up -d --build         # first build downloads ~8 GB (CUDA + torch
 docker compose logs -f tts
 
 # 1) clean + validate the reference voice
+#    Record 5-15 s of your own voice and put it here:
+#      cp ~/my_voice.wav data/references/my_voice.wav
 docker compose exec tts python scripts/clean_audio.py \
-    -i data/references/my_voice_v2.wav \
-    --transcript data/references/my_voice_v2.txt
+    -i data/references/my_voice.wav \
+    --transcript data/references/my_voice.txt
 
-# 2) benchmark cold start / peak VRAM / RTF  (spec Phase 5)
+# 2) benchmark cold start / peak VRAM / RTF
 docker compose exec tts python scripts/benchmark_test.py
 
 # 3) long-form batch synthesis
 docker compose exec tts python scripts/process_txt.py \
     -i data/input/test_audio_sample.txt
 ```
+
+The transcripts under `data/references/` and `data/input/` are committed, but
+**the `.wav` files are not** — ignored on purpose, because a voice is personal
+and large. Record your own reference; everything else works unchanged. For
+continuation cloning the transcript must match the audio word for word.
 
 Then open <http://127.0.0.1:8000/docs> for the OpenAPI UI and
 `data/output/benchmark_report.json` for the benchmark verdict.
@@ -49,6 +54,28 @@ or override.
 ---
 
 ## 2. Layout
+
+Project identity is declared once, in `app/__init__.py`:
+
+| constant | value | used for |
+| :--- | :--- | :--- |
+| `__title__` | `VoxDock` | FastAPI `/docs` title |
+| `__package_name__` / `IMAGE_NAME` | `voxdock-tts` | Docker image, `voxdock-tts:latest` |
+| `CONTAINER_NAME` | `voxdock-tts` | container name (`docker logs voxdock-tts`) |
+| `COMPOSE_PROJECT` | `voxdock` | compose project namespace |
+| `LOG_NAMESPACE` | `voxdock` | our logger namespace (`voxdock.api`, …) |
+| `HF_CACHE_VOLUME` | `local_tts_hf_cache` | the weight cache volume |
+
+Docker Compose cannot read Python, so `docker-compose.yml` repeats these as
+inline `${VAR:-default}` fallbacks. To catch drift:
+
+```bash
+python scripts/check_identity.py     # exits non-zero if the two disagree
+```
+
+`HF_CACHE_VOLUME` is deliberately *not* renamed: Docker cannot rename a volume,
+and this one holds ~4.4 GB of checkpoint weights that would otherwise be
+re-downloaded.
 
 ```text
 .

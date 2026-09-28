@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1.7
 # =============================================================================
-#  dots.tts (dots-studio/dots.tts-*) — containerised GPU TTS service
+#  VoxDock (voxdock-tts) — containerised GPU TTS service on dots.tts
+#     image: voxdock-tts:latest      (name declared in app/__init__.py)
 #  Base: NVIDIA CUDA runtime image (no host pollution, GPU via nvidia-container-toolkit)
 #
 #  DEVIATION FROM SPEC (documented on purpose):

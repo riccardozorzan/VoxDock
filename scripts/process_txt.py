@@ -46,6 +46,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from app import LOG_NAMESPACE
 from app.config import load_best_config, settings  # noqa: E402
 from app.utils import now_iso, wav_duration_seconds  # noqa: E402
 

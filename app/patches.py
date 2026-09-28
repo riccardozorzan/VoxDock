@@ -48,7 +48,9 @@ import gc
 import logging
 from typing import Any
 
-logger = logging.getLogger("dots_tts.patches")
+from app import LOG_NAMESPACE
+
+logger = logging.getLogger(f"{LOG_NAMESPACE}.patches")
 
 __all__ = [
     "VOCODER_CHUNK_PATCHES",

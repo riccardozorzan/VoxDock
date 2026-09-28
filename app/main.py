@@ -25,7 +25,7 @@ from typing import Any, Optional
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
 
-from app import __version__
+from app import LOG_NAMESPACE, __version__
 from app.config import best_config, settings
 from app.speakers import SpeakerRegistry
 from app.utils import (
@@ -42,7 +42,7 @@ from app.utils import (
     wav_duration_seconds,
 )
 
-logger = logging.getLogger("dots_tts.api")
+logger = logging.getLogger(f"{LOG_NAMESPACE}.api")
 
 # --------------------------------------------------------------------------- #
 #  Runtime bootstrap
@@ -169,10 +169,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.api.title,
     version=settings.api.version,
-    description=(
-        "Local, GPU-accelerated text-to-speech with continuation voice cloning "
-        "powered by dots.tts (48 kHz AudioVAE)."
-    ),
+    description=settings.api.description,
     lifespan=lifespan,
 )
 
@@ -696,11 +693,14 @@ async def create_speech(
 #  Logging
 # --------------------------------------------------------------------------- #
 def configure_logging() -> None:
-    """Attach a stdout handler so ``dots_tts.api`` / ``dots_tts.patches`` emit.
+    """Attach a stdout handler so the VoxDock loggers actually emit.
 
     ``uvicorn`` configures its own loggers and the ``dots_tts`` package installs
     its own, so without this the application loggers have no handler and the
     startup / patch / request records never reach the container log.
+
+    ``voxdock.*`` is this project's namespace; ``dots_tts.*`` belongs to the
+    upstream engine and keeps its own level.
     """
     level = getattr(logging, settings.log_level.upper(), logging.INFO)
     root = logging.getLogger()
@@ -711,7 +711,7 @@ def configure_logging() -> None:
         )
         root.addHandler(handler)
     root.setLevel(level)
-    for name in ("dots_tts.api", "dots_tts.patches"):
-        logging.getLogger(name).setLevel(level)
+    for module in ("api", "patches", "utils"):
+        logging.getLogger(f"{LOG_NAMESPACE}.{module}").setLevel(level)
 
 configure_logging()
