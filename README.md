@@ -225,13 +225,13 @@ The most useful knobs:
 
 ## 6. Finding the best settings for *your* GPU
 
-`scripts/tune_settings.py` sweeps the runtime settings, measures each candidate
+`scripts/autotune.py` sweeps the runtime settings, measures each candidate
 with the real benchmark, and writes the winning configuration out.
 
 ```bash
-python scripts/tune_settings.py                    # full sweep, dry run
-python scripts/tune_settings.py --quick --apply    # fast, and install it
-python scripts/tune_settings.py --only reference   # cheapest dimension (~5 min)
+python scripts/autotune.py                    # full sweep, dry run
+python scripts/autotune.py --quick --apply    # fast, and install it
+python scripts/autotune.py --only reference   # cheapest dimension (~5 min)
 ```
 
 Everything is configurable: `--objective {balanced,throughput,headroom}`,

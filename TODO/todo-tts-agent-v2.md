@@ -246,15 +246,15 @@ patch releases `_static_generate_workspaces`, then decodes in fixed
 VRAM lever (12 vs 32 patches: 5.35 vs 5.36 GB) but it bounds the worst case for
 long audio, so it is kept as insurance.
 
-### `scripts/tune_settings.py` — the settings autotuner
+### `scripts/autotune.py` — the settings autotuner
 
 Sweeps settings, measures each candidate with the real benchmark, and writes the
 winning configuration out. All controls are CLI flags.
 
 ```bash
-python scripts/tune_settings.py                    # full sweep, dry run
-python scripts/tune_settings.py --quick --apply    # fast, install it
-python scripts/tune_settings.py --only reference   # cheapest dimension
+python scripts/autotune.py                    # full sweep, dry run
+python scripts/autotune.py --quick --apply    # fast, install it
+python scripts/autotune.py --only reference   # cheapest dimension
 ```
 
 | Flag | Meaning |
@@ -487,8 +487,8 @@ docker compose exec tts python scripts/clean_audio.py \
     --input data/references/my_voice_v2.wav --trim-to 7.0
 
 # find the best settings for this GPU
-python scripts/tune_settings.py --quick          # dry run
-python scripts/tune_settings.py --quick --apply  # install
+python scripts/autotune.py --quick          # dry run
+python scripts/autotune.py --quick --apply  # install
 ```
 
 After any `.env` change: `docker compose up -d --force-recreate` and expect a
