@@ -18,7 +18,7 @@ import asyncio
 import base64
 import logging
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from typing import Any, Optional
 
@@ -26,10 +26,13 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
 
 from app import __version__
-from app.config import settings
+from app.config import best_config, settings
+from app.speakers import SpeakerRegistry
 from app.utils import (
-    cuda_empty_cache,
+    clear_cuda_cache,
+    clear_prompt_cache,
     gpu_snapshot,
+    is_out_of_memory,
     now_iso,
     reset_cuda_peak_stats,
     resolve_precision,
@@ -40,7 +43,6 @@ from app.utils import (
 )
 
 logger = logging.getLogger("dots_tts.api")
-
 
 # --------------------------------------------------------------------------- #
 #  Runtime bootstrap
@@ -60,7 +62,6 @@ def _seed_everything(seed: int) -> None:
     torch.manual_seed(int(seed))
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(int(seed))
-
 
 def load_runtime() -> dict[str, Any]:
     """Blocking model load executed in a worker thread during startup."""
@@ -120,7 +121,6 @@ def load_runtime() -> dict[str, Any]:
         "patch_seconds": patch_seconds,
     }
 
-
 # --------------------------------------------------------------------------- #
 #  Application lifespan
 # --------------------------------------------------------------------------- #
@@ -136,6 +136,11 @@ async def lifespan(app: FastAPI):
     app.state.last_generation = None
     app.state.lifetime_peak_vram_mb = None
     app.state.request_count = 0
+    app.state.speakers = SpeakerRegistry(settings.paths.speakers_dir)
+    logger.info(
+        "Registered speakers on disk: %d",
+        len(app.state.speakers.list()),
+    )
 
     logger.info(
         "Starting %s v%s | model=%s | max_generate_length=%s",
@@ -159,8 +164,7 @@ async def lifespan(app: FastAPI):
         logger.info("Shutting down; releasing GPU memory")
         app.state.runtime = None
         app.state.runtime_info = None
-        cuda_empty_cache()
-
+        clear_cuda_cache()
 
 app = FastAPI(
     title=settings.api.title,
@@ -171,7 +175,6 @@ app = FastAPI(
     ),
     lifespan=lifespan,
 )
-
 
 # --------------------------------------------------------------------------- #
 #  Shared payload builders
@@ -185,7 +188,6 @@ def _require_runtime(request: Request) -> Any:
             detail=f"TTS engine is not available yet: {detail}",
         )
     return runtime
-
 
 def _model_payload(request: Request) -> dict[str, Any]:
     info = getattr(request.app.state, "runtime_info", None)
@@ -210,11 +212,9 @@ def _model_payload(request: Request) -> dict[str, Any]:
         payload["error"] = request.app.state.model_error
     return payload
 
-
 def _vram_usage_mb() -> Optional[float]:
     snapshot = gpu_snapshot()
     return snapshot.get("vram_allocated_mb")
-
 
 # --------------------------------------------------------------------------- #
 #  Synthesis worker (blocking -> executed in a thread pool)
@@ -294,7 +294,6 @@ def _generate_sync(
     }
     return {"audio": audio, "sample_rate": sample_rate, "metrics": metrics}
 
-
 # --------------------------------------------------------------------------- #
 #  Routes
 # --------------------------------------------------------------------------- #
@@ -315,7 +314,6 @@ async def root(request: Request) -> dict[str, Any]:
         "rtf_target": settings.model.rtf_target,
         "timestamp": now_iso(),
     }
-
 
 @app.get(settings.api.health_path)
 async def health(request: Request) -> JSONResponse:
@@ -352,6 +350,17 @@ async def health(request: Request) -> JSONResponse:
         "request_count": state.request_count,
         "device": settings.model.device,
         "model": model,
+        # Which resolution tier produced each setting (v3 Task 3.1). Makes it
+        # obvious whether a tuned profile is actually in force.
+        "config_source": {
+            "best_config": best_config or None,
+            "best_config_path": str(settings.paths.output_dir / "best_config.json"),
+        },
+        "speakers": {
+            "registered": len(getattr(state, "speakers").list())
+            if getattr(state, "speakers", None)
+            else 0,
+        },
         "vram_limit_gb": settings.model.vram_limit_gb,
         "vram_within_limit": (
             peak_allocated is None or peak_allocated <= limit_mb
@@ -376,11 +385,96 @@ async def health(request: Request) -> JSONResponse:
     }
     return JSONResponse(status_code=200 if runtime is not None else 503, content=body)
 
-
 @app.get("/v1/models")
 async def list_models(request: Request) -> dict[str, Any]:
     return {"object": "list", "data": [_model_payload(request)]}
 
+# --------------------------------------------------------------------------- #
+#  Speaker registry (v3 Task 3.3)
+# --------------------------------------------------------------------------- #
+def _registry(request: Request) -> SpeakerRegistry:
+    return request.app.state.speakers
+
+@app.post("/v1/speakers/register", status_code=201)
+async def register_speaker(
+    request: Request,
+    reference_audio: UploadFile = File(..., description="Clean 5-15 s reference WAV."),
+    reference_text: str = Form(
+        ..., description="Exact transcript of reference_audio (continuation cloning)."
+    ),
+    speaker_id: Optional[str] = Form(
+        None, description="Reusable name; generated when omitted."
+    ),
+    overwrite: bool = Form(False, description="Replace an existing speaker_id."),
+) -> dict[str, Any]:
+    """Store a voice once so later requests can reference it by ``speaker_id``.
+
+    The clip is validated for decodability and duration before being stored, so
+    a broken reference is rejected at registration rather than failing on every
+    subsequent chunk.
+    """
+    payload = await reference_audio.read()
+    await reference_audio.close()
+
+    max_bytes = settings.api.max_upload_mb * 1024 * 1024
+    if len(payload) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"'reference_audio' exceeds {settings.api.max_upload_mb} MB.",
+        )
+
+    record = _registry(request).register(
+        speaker_id=speaker_id,
+        audio_bytes=payload,
+        audio_filename=reference_audio.filename or "reference.wav",
+        reference_text=reference_text,
+        overwrite=overwrite,
+    )
+    data = record.as_dict()
+    data["duration_seconds"] = round(wav_duration_seconds(record.audio_path), 3)
+    return {"object": "speaker", **data}
+
+@app.get("/v1/speakers")
+async def list_speakers(request: Request) -> dict[str, Any]:
+    """Every registered voice, with the number of times each has been reused."""
+    records = _registry(request).list()
+    return {
+        "object": "list",
+        "data": [
+            {**record.as_dict(), "duration_seconds": round(
+                wav_duration_seconds(record.audio_path), 3
+            )}
+            for record in records
+        ],
+    }
+
+@app.delete("/v1/speakers/{speaker_id}")
+async def delete_speaker(request: Request, speaker_id: str) -> dict[str, Any]:
+    if not _registry(request).delete(speaker_id):
+        raise HTTPException(status_code=404, detail=f"unknown speaker {speaker_id!r}.")
+    return {"object": "deleted", "id": speaker_id}
+
+@app.post("/v1/admin/clear-cache")
+async def clear_cache(request: Request) -> dict[str, Any]:
+    """Drop prompt latents and free cached CUDA blocks.
+
+    ``process_txt.py`` calls this before retrying a chunk that ran out of
+    memory, so a transient spike does not turn into a permanently wedged
+    engine.
+    """
+    state = request.app.state
+    released = clear_cuda_cache()
+    prompt_entries = clear_prompt_cache(getattr(state, "runtime", None))
+    state.request_count = 0
+    logger.info(
+        "Cache cleared: cuda released=%s, prompt entries=%s", released, prompt_entries
+    )
+    return {
+        "object": "cache",
+        "cuda_cache_released": released,
+        "prompt_cache_entries_cleared": prompt_entries,
+        "gpu": gpu_snapshot(),
+    }
 
 @app.post(
     settings.api.speech_path,
@@ -397,9 +491,22 @@ async def list_models(request: Request) -> dict[str, Any]:
 async def create_speech(
     request: Request,
     text: str = Form(..., description="Text to synthesise (prosody follows . , ! ? ...)."),
-    reference_audio: UploadFile = File(..., description="Clean 5-15 s reference WAV."),
-    reference_text: str = Form(
-        ..., description="Exact transcript of reference_audio (continuation cloning)."
+    reference_audio: Optional[UploadFile] = File(
+        None,
+        description=(
+            "Clean 5-15 s reference WAV. Omit when 'speaker_id' names a "
+            "previously registered voice (v3 Task 3.3)."
+        ),
+    ),
+    speaker_id: Optional[str] = Form(
+        None, description="Reuse a voice registered via /v1/speakers/register."
+    ),
+    reference_text: Optional[str] = Form(
+        None,
+        description=(
+            "Exact transcript of reference_audio (continuation cloning). "
+            "Required unless 'speaker_id' is given."
+        ),
     ),
     num_steps: Optional[int] = Form(None, ge=1, le=64),
     guidance_scale: Optional[float] = Form(None, gt=0.0),
@@ -410,33 +517,62 @@ async def create_speech(
     template_name: Optional[str] = Form(None),
     include_metrics: bool = Form(False),
 ) -> Response:
-    """Synthesise ``text`` in the voice of ``reference_audio``."""
+    """Synthesise ``text`` in the voice of ``reference_audio`` or ``speaker_id``."""
     runtime = _require_runtime(request)
 
     cleaned_text = (text or "").strip()
     if not cleaned_text:
         raise HTTPException(status_code=400, detail="'text' must not be empty.")
 
-    cleaned_prompt_text = (reference_text or "").strip()
-    if not cleaned_prompt_text:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "'reference_text' must not be empty: continuation voice cloning "
-                "needs the exact transcript of the reference audio."
-            ),
-        )
+    state = request.app.state
 
-    payload = await reference_audio.read()
-    await reference_audio.close()
-    if not payload:
-        raise HTTPException(status_code=400, detail="'reference_audio' is empty.")
-    max_bytes = settings.api.max_upload_mb * 1024 * 1024
-    if len(payload) > max_bytes:
-        raise HTTPException(
-            status_code=413,
-            detail=f"'reference_audio' exceeds {settings.api.max_upload_mb} MB.",
-        )
+    # Resolve the prompt source: an inline reference_audio, or a registered
+    # speaker. speaker_id wins when both are supplied (explicit reuse).
+    record = None
+    if speaker_id:
+        record = _registry(request).get(speaker_id.strip())
+        if record is None:
+            raise HTTPException(
+                status_code=404, detail=f"unknown speaker_id {speaker_id!r}."
+            )
+        prompt_text = record.reference_text
+        prompt_wav = record.audio_path
+        prompt_suffix = ".wav"
+        if reference_audio is not None:
+            await reference_audio.close()  # discarded in favour of the registry
+    else:
+        if reference_audio is None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "provide either 'reference_audio' (inline) or 'speaker_id' "
+                    "(a voice registered via /v1/speakers/register)."
+                ),
+            )
+        cleaned_prompt_text = (reference_text or "").strip()
+        if not cleaned_prompt_text:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "'reference_text' must not be empty: continuation voice cloning "
+                    "needs the exact transcript of the reference audio."
+                ),
+            )
+        payload = await reference_audio.read()
+        await reference_audio.close()
+        if not payload:
+            raise HTTPException(status_code=400, detail="'reference_audio' is empty.")
+        max_bytes = settings.api.max_upload_mb * 1024 * 1024
+        if len(payload) > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"'reference_audio' exceeds {settings.api.max_upload_mb} MB.",
+            )
+        prompt_suffix = Path(
+            safe_filename(reference_audio.filename or "reference.wav")
+        ).suffix
+        prompt_wav = None  # written to a temp file below
+        prompt_text = cleaned_prompt_text
 
     # --- parameter resolution (spec Task 3.3 defaults: 10 steps / CFG 1.2) ---
     effective_num_steps = (
@@ -457,19 +593,28 @@ async def create_speech(
         settings.model.normalize_text if normalize_text is None else bool(normalize_text)
     )
 
-    suffix = Path(safe_filename(reference_audio.filename or "reference.wav")).suffix
-    state = request.app.state
-# SPEECH-ENDPOINT-CONTINUE
-    with temp_file_path(suffix=suffix or ".wav", prefix="ref_") as reference_path:
-        Path(reference_path).write_bytes(payload)
+    # A registered speaker already lives at a stable path; an inline upload has
+    # to be staged in a temp file for the duration of the request only.
+    @contextmanager
+    def _prompt_source():
+        if prompt_wav is not None:
+            yield prompt_wav
+        else:
+            with temp_file_path(
+                suffix=prompt_suffix or ".wav", prefix="ref_"
+            ) as staged:
+                Path(staged).write_bytes(payload)
+                yield staged
+
+    with _prompt_source() as prompt_path:
         async with state.generation_lock:
             try:
                 outcome = await asyncio.to_thread(
                     _generate_sync,
                     runtime,
                     text=cleaned_text,
-                    prompt_audio_path=reference_path,
-                    prompt_text=cleaned_prompt_text,
+                    prompt_audio_path=prompt_path,
+                    prompt_text=prompt_text,
                     num_steps=effective_num_steps,
                     guidance_scale=effective_guidance,
                     seed=seed,
@@ -482,16 +627,31 @@ async def create_speech(
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
             except Exception as exc:
                 logger.exception("Synthesis failed")
+                # Surface O distinctly: the client halves the chunk and retries,
+                # which is pointless for any other failure.
+                if is_out_of_memory(exc):
+                    raise HTTPException(
+                        status_code=503,
+                        detail={
+                            "error": "out_of_memory",
+                            "message": f"{type(exc).__name__}: {exc}",
+                            "retryable": True,
+                        },
+                    ) from exc
                 raise HTTPException(
                     status_code=500, detail=f"{type(exc).__name__}: {exc}"
                 ) from exc
 
             state.request_count += 1
+            if record is not None:
+                _registry(request).count_request(record.id)
+            reference_seconds = round(wav_duration_seconds(prompt_path), 3)
             state.last_generation = {
                 **outcome["metrics"],
                 "timestamp": now_iso(),
                 "text_chars": len(cleaned_text),
-                "reference_seconds": round(wav_duration_seconds(reference_path), 3),
+                "reference_seconds": reference_seconds,
+                "speaker_id": record.id if record is not None else None,
             }
 
     metrics = outcome["metrics"]
@@ -532,9 +692,6 @@ async def create_speech(
     }
     return Response(content=wav_bytes, media_type="audio/wav", headers=headers)
 
-
-
-
 # --------------------------------------------------------------------------- #
 #  Logging
 # --------------------------------------------------------------------------- #
@@ -556,6 +713,5 @@ def configure_logging() -> None:
     root.setLevel(level)
     for name in ("dots_tts.api", "dots_tts.patches"):
         logging.getLogger(name).setLevel(level)
-
 
 configure_logging()

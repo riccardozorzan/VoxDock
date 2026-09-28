@@ -28,6 +28,9 @@ __all__ = [
     "torch_available",
     "gpu_snapshot",
     "reset_cuda_peak_stats",
+    "clear_cuda_cache",
+    "clear_prompt_cache",
+    "is_out_of_memory",
     "to_numpy_mono",
     "tensor_to_wav_bytes",
     "write_wav",
@@ -192,14 +195,60 @@ def reset_cuda_peak_stats() -> None:
         logger.debug("reset_peak_memory_stats failed", exc_info=True)
 
 
-def cuda_empty_cache() -> None:
+def clear_cuda_cache() -> bool:
+    """Empty the CUDA caching allocator; returns whether it actually ran.
+
+    Called between chunks and after an OOM so that freed blocks return to the
+    driver instead of being held by the allocator.
+    """
     try:
         import torch
 
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        if not torch.cuda.is_available():
+            return False
+        torch.cuda.empty_cache()
+        return True
     except Exception:  # pragma: no cover - defensive
         logger.debug("empty_cache failed", exc_info=True)
+        return False
+
+
+def clear_prompt_cache(runtime: Any) -> int:
+    """Drop ``dots_tts``' cached prompt latents. Returns entries removed.
+
+    ``DotsTtsModel`` keeps an ``OrderedDict`` of prompt latents keyed by a hash
+    of the reference clip. On a GPU this tight that cache is a real memory
+    hold, so ``/v1/admin/clear-cache`` evicts it wholesale instead of relying on
+    the library's own size limit.
+    """
+    model = getattr(runtime, "model", None)
+    cache = getattr(model, "_prompt_feature_cache", None)
+    if cache is None:
+        return 0
+    try:
+        removed = len(cache)
+        cache.clear()
+        return removed
+    except Exception:  # pragma: no cover - library internals may change
+        logger.debug("could not clear prompt cache", exc_info=True)
+        return 0
+
+
+def is_out_of_memory(exc: BaseException) -> bool:
+    """Whether ``exc`` (or anything in its cause chain) is a CUDA OOM.
+
+    Classifying this server-side keeps the client's split-and-retry logic from
+    having to pattern-match driver error strings.
+    """
+    seen: set[int] = set()
+    current: Optional[BaseException] = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, MemoryError) or "out of memory" in str(current).lower():
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
 
 
 # --------------------------------------------------------------------------- #

@@ -9,6 +9,10 @@
 data/**/*.wav
 data/temp_chunks/
 
+# Registered speaker prompts: the WAVs are covered by the *.wav rule above, but
+# the sidecar transcripts are personal too, so the whole store is ignored.
+data/speakers/
+
 # Generated audio is ignored, but the JSON reports are kept: they are small and
 # they are the evidence behind every number claimed in the docs
 # (benchmark_report.json, tuning_report.json, best_config.json).

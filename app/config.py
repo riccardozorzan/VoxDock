@@ -218,14 +218,27 @@ class PathSettings:
         """Phase-5 output: JSON benchmark log."""
         return self.output_dir / "benchmark_report.json"
 
+    @property
+    def speakers_dir(self) -> Path:
+        """Registered speaker prompts (v3 Task 3.3).
+
+        One ``<id>.wav`` + ``<id>.txt`` per registered voice. Storing them on
+        disk rather than in RAM is deliberate: ``dots_tts`` is handed a *path*,
+        so an in-memory blob would have to be written to a temp file on every
+        request anyway, and a registered voice would vanish on restart. On disk
+        it is reloaded by id at zero per-request cost.
+        """
+        return self.data_dir / "speakers"
+
     def ensure(self) -> "PathSettings":
-        """Create every directory the pipeline needs. Idempotent."""
+
         for directory in (
             self.data_dir,
             self.references_dir,
             self.input_dir,
             self.temp_chunks_dir,
             self.output_dir,
+            self.speakers_dir,
         ):
             directory.mkdir(parents=True, exist_ok=True)
         return self
