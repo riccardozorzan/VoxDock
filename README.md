@@ -8,6 +8,8 @@ on a laptop RTX 4050 (6 GB). Nothing is installed on the host except Docker.
 * **Service** — FastAPI `POST /v1/audio/speech` (raw `audio/wav`) + `GET /health`
   with live VRAM telemetry.
 * **Pipeline** — `clean_audio.py` → `process_txt.py` → `benchmark_test.py`.
+* **Status** — see [`TODO/todo-tts-agent-v4.md`](TODO/todo-tts-agent-v4.md) for
+  what is done, where each artefact lives, and what is still open.
 
 ---
 

@@ -497,6 +497,9 @@ until the engine is truly ready.
 
 ---
 
+> Superseded for status purposes by
+> [`todo-tts-agent-v4.md`](todo-tts-agent-v4.md).
+
 ## Pointers for whoever continues
 
 1. **Profile the ~1.0 s fixed per-request cost first** (limit #1). It is the only

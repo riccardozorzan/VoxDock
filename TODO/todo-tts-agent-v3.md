@@ -139,6 +139,10 @@ local-tts-docker/
 ## 🚀 Quick Execution Prompt for the Agent
 
 > "Agent, please implement the containerized TTS system described in this `todo-tts-agent-v3.md` specification file. Key additions in v3 include an automated initial benchmarking and auto-tuning script (`scripts/autotune.py`) that runs upon installation to test all parameters and both model variants (`dots.tts-soar` and `dots.tts-mf`), saving the optimal configuration to `data/output/best_config.json`. Furthermore, implement voice prompt caching, silence insertion between chunks, EBU R128 audio normalization, and emergency OOM auto-splitting in `scripts/process_txt.py`."
+> **Status now lives in [`todo-tts-agent-v4.md`](todo-tts-agent-v4.md)** —
+> that file records what is done, where each artefact is stored, and what
+> is still open. This document remains the original specification.
+
 ## 📊 Implementation Status (as implemented)
 
 All of Phases 1-5 and Task 6.1/6.4 are implemented and verified. Only 6.2/6.3
