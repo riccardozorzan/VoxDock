@@ -1,0 +1,241 @@
+{
+  "generated": "2026-09-28T15:28:02.664439+00:00",
+  "objective": "balanced",
+  "profiles": [
+    "short",
+    "long"
+  ],
+  "thresholds": {
+    "vram_limit_gb": 5.5,
+    "vram_margin_gb": 0.1,
+    "rtf_target": 0.5
+  },
+  "reference": {
+    "name": "ref_l",
+    "label": "3 sentences",
+    "audio": "/home/r3msi/Documents/projects/products/TTS/data/input/ref_l.wav",
+    "seconds": 11.45,
+    "patches": 72,
+    "patch_seconds": 0.16
+  },
+  "reference_set": [
+    {
+      "name": "ref_s",
+      "label": "1 sentence",
+      "audio": "/home/r3msi/Documents/projects/products/TTS/data/input/ref_s.wav",
+      "seconds": 4.05,
+      "patches": 26
+    },
+    {
+      "name": "ref_m",
+      "label": "2 sentences",
+      "audio": "/home/r3msi/Documents/projects/products/TTS/data/input/ref_m.wav",
+      "seconds": 7.25,
+      "patches": 46
+    },
+    {
+      "name": "ref_l",
+      "label": "3 sentences",
+      "audio": "/home/r3msi/Documents/projects/products/TTS/data/input/ref_l.wav",
+      "seconds": 11.45,
+      "patches": 72
+    }
+  ],
+  "quick_mode": true,
+  "winner": null,
+  "ranking": [],
+  "candidates": [
+    {
+      "label": "reference=ref_s",
+      "config": {
+        "TTS_BIND_HOST": "127.0.0.1",
+        "TTS_PORT": "8000",
+        "TTS_MODEL_NAME": "dots-studio/dots.tts-mf",
+        "TTS_PRECISION": "bfloat16",
+        "TTS_OPTIMIZE": "true",
+        "TTS_WARMUP_ON_OPTIMIZE": "true",
+        "TTS_MAX_GENERATE_LENGTH": "128",
+        "TTS_MAX_SEQUENCE_LENGTH": "1024",
+        "TTS_VOCODER_MERGE_STEPS": "4",
+        "TTS_LOW_VRAM_PATCHES": "true",
+        "TTS_VOCODER_CHUNK_PATCHES": "12",
+        "TTS_NUM_STEPS": "2",
+        "TTS_GUIDANCE_SCALE": "1.2",
+        "TTS_SPEAKER_SCALE": "1.5",
+        "TTS_SEED": "42",
+        "TTS_LANGUAGE": "none",
+        "TTS_NORMALIZE_TEXT": "false",
+        "TTS_VRAM_LIMIT_GB": "5.5",
+        "TTS_RTF_TARGET": "0.5",
+        "TTS_NOISE_PROP_DECREASE": "0.85",
+        "TTS_STATIONARY_NOISE": "true",
+        "TTS_SAMPLE_RATE": "48000",
+        "TTS_REF_MIN_SECONDS": "5",
+        "TTS_REF_MAX_SECONDS": "15",
+        "TTS_CHUNK_MAX_WORDS": "35",
+        "TTS_WORDS_PER_SECOND": "2.5",
+        "TTS_MAX_RETRIES": "3",
+        "TTS_LOG_LEVEL": "info",
+        "TTS_API_URL": "http://localhost:8000",
+        "HF_TOKEN": ""
+      },
+      "feasible": false,
+      "rejected": "worst-profile RTF 0.647 exceeds the target 0.5",
+      "skipped": false,
+      "worst_rtf": 0.647,
+      "mean_rtf": 0.5365,
+      "peak_vram_mb": 5510.0,
+      "peak_vram_gb": 5.381,
+      "usable_audio_seconds": 16.48,
+      "score": null,
+      "trials": [
+        {
+          "profile": "short",
+          "ok": true,
+          "error": "",
+          "rtf": 0.647,
+          "peak_vram_mb": 5498.0,
+          "audio_seconds": 3.36,
+          "generation_seconds": 2.174
+        },
+        {
+          "profile": "long",
+          "ok": true,
+          "error": "",
+          "rtf": 0.4261,
+          "peak_vram_mb": 5510.0,
+          "audio_seconds": 16.48,
+          "generation_seconds": 7.023
+        }
+      ]
+    },
+    {
+      "label": "reference=ref_m",
+      "config": {
+        "TTS_BIND_HOST": "127.0.0.1",
+        "TTS_PORT": "8000",
+        "TTS_MODEL_NAME": "dots-studio/dots.tts-mf",
+        "TTS_PRECISION": "bfloat16",
+        "TTS_OPTIMIZE": "true",
+        "TTS_WARMUP_ON_OPTIMIZE": "true",
+        "TTS_MAX_GENERATE_LENGTH": "128",
+        "TTS_MAX_SEQUENCE_LENGTH": "1024",
+        "TTS_VOCODER_MERGE_STEPS": "4",
+        "TTS_LOW_VRAM_PATCHES": "true",
+        "TTS_VOCODER_CHUNK_PATCHES": "12",
+        "TTS_NUM_STEPS": "2",
+        "TTS_GUIDANCE_SCALE": "1.2",
+        "TTS_SPEAKER_SCALE": "1.5",
+        "TTS_SEED": "42",
+        "TTS_LANGUAGE": "none",
+        "TTS_NORMALIZE_TEXT": "false",
+        "TTS_VRAM_LIMIT_GB": "5.5",
+        "TTS_RTF_TARGET": "0.5",
+        "TTS_NOISE_PROP_DECREASE": "0.85",
+        "TTS_STATIONARY_NOISE": "true",
+        "TTS_SAMPLE_RATE": "48000",
+        "TTS_REF_MIN_SECONDS": "5",
+        "TTS_REF_MAX_SECONDS": "15",
+        "TTS_CHUNK_MAX_WORDS": "35",
+        "TTS_WORDS_PER_SECOND": "2.5",
+        "TTS_MAX_RETRIES": "3",
+        "TTS_LOG_LEVEL": "info",
+        "TTS_API_URL": "http://localhost:8000",
+        "HF_TOKEN": ""
+      },
+      "feasible": false,
+      "rejected": "worst-profile RTF 0.632 exceeds the target 0.5",
+      "skipped": false,
+      "worst_rtf": 0.6317,
+      "mean_rtf": 0.5433,
+      "peak_vram_mb": 5510.0,
+      "peak_vram_gb": 5.381,
+      "usable_audio_seconds": 13.28,
+      "score": null,
+      "trials": [
+        {
+          "profile": "short",
+          "ok": true,
+          "error": "",
+          "rtf": 0.6317,
+          "peak_vram_mb": 5500.0,
+          "audio_seconds": 3.68,
+          "generation_seconds": 2.325
+        },
+        {
+          "profile": "long",
+          "ok": true,
+          "error": "",
+          "rtf": 0.4549,
+          "peak_vram_mb": 5510.0,
+          "audio_seconds": 13.28,
+          "generation_seconds": 6.041
+        }
+      ]
+    },
+    {
+      "label": "reference=ref_l",
+      "config": {
+        "TTS_BIND_HOST": "127.0.0.1",
+        "TTS_PORT": "8000",
+        "TTS_MODEL_NAME": "dots-studio/dots.tts-mf",
+        "TTS_PRECISION": "bfloat16",
+        "TTS_OPTIMIZE": "true",
+        "TTS_WARMUP_ON_OPTIMIZE": "true",
+        "TTS_MAX_GENERATE_LENGTH": "128",
+        "TTS_MAX_SEQUENCE_LENGTH": "1024",
+        "TTS_VOCODER_MERGE_STEPS": "4",
+        "TTS_LOW_VRAM_PATCHES": "true",
+        "TTS_VOCODER_CHUNK_PATCHES": "12",
+        "TTS_NUM_STEPS": "2",
+        "TTS_GUIDANCE_SCALE": "1.2",
+        "TTS_SPEAKER_SCALE": "1.5",
+        "TTS_SEED": "42",
+        "TTS_LANGUAGE": "none",
+        "TTS_NORMALIZE_TEXT": "false",
+        "TTS_VRAM_LIMIT_GB": "5.5",
+        "TTS_RTF_TARGET": "0.5",
+        "TTS_NOISE_PROP_DECREASE": "0.85",
+        "TTS_STATIONARY_NOISE": "true",
+        "TTS_SAMPLE_RATE": "48000",
+        "TTS_REF_MIN_SECONDS": "5",
+        "TTS_REF_MAX_SECONDS": "15",
+        "TTS_CHUNK_MAX_WORDS": "35",
+        "TTS_WORDS_PER_SECOND": "2.5",
+        "TTS_MAX_RETRIES": "3",
+        "TTS_LOG_LEVEL": "info",
+        "TTS_API_URL": "http://localhost:8000",
+        "HF_TOKEN": ""
+      },
+      "feasible": false,
+      "rejected": "peak 5.43 GB exceeds the 5.40 GB budget (limit 5.5 GB - margin 0.1 GB)",
+      "skipped": false,
+      "worst_rtf": 0.6388,
+      "mean_rtf": 0.5609,
+      "peak_vram_mb": 5560.0,
+      "peak_vram_gb": 5.43,
+      "usable_audio_seconds": 9.12,
+      "score": null,
+      "trials": [
+        {
+          "profile": "short",
+          "ok": true,
+          "error": "",
+          "rtf": 0.6388,
+          "peak_vram_mb": 5560.0,
+          "audio_seconds": 3.84,
+          "generation_seconds": 2.453
+        },
+        {
+          "profile": "long",
+          "ok": true,
+          "error": "",
+          "rtf": 0.483,
+          "peak_vram_mb": 5560.0,
+          "audio_seconds": 9.12,
+          "generation_seconds": 4.405
+        }
+      ]
+    }
+  ]
+}

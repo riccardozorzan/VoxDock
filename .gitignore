@@ -1,0 +1,23 @@
+# Local configuration. `.env` holds this machine's settings (and a slot for
+# HF_TOKEN); `.env.example` is the committed template.
+.env
+.env.bak-*
+
+# Voice recordings and derived audio: large, and personal. The transcripts
+# (data/**/*.txt) and reference_set.json are kept - they are small and are what
+# makes the cloning reproducible.
+data/**/*.wav
+data/temp_chunks/
+
+# Generated audio is ignored, but the JSON reports are kept: they are small and
+# they are the evidence behind every number claimed in the docs
+# (benchmark_report.json, tuning_report.json, best_config.json).
+data/output/*.wav
+data/output/*.raw.wav
+data/output/*_raw.wav
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/

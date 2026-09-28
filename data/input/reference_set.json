@@ -1,0 +1,31 @@
+{
+  "_comment": [
+    "Reference clips the autotuner may choose between.",
+    "The reference-prompt prefill is a FIXED cost paid on every request, so its",
+    "length is usually the dominant lever for short-utterance RTF -- more",
+    "important than any env setting. Continuation cloning needs the transcript to",
+    "match the audio exactly, hence one .txt per .wav, cut on sentence",
+    "boundaries detected in data/references/my_voice_v2.wav.",
+    "patch counts: ref_s 4.05s=26, ref_m 7.25s=46, ref_l 11.45s=72 (1 patch=0.16s)"
+  ],
+  "references": [
+    {
+      "name": "ref_s",
+      "label": "1 sentence",
+      "audio": "data/input/ref_s.wav",
+      "text": "data/input/ref_s.txt"
+    },
+    {
+      "name": "ref_m",
+      "label": "2 sentences",
+      "audio": "data/input/ref_m.wav",
+      "text": "data/input/ref_m.txt"
+    },
+    {
+      "name": "ref_l",
+      "label": "3 sentences",
+      "audio": "data/input/ref_l.wav",
+      "text": "data/input/ref_l.txt"
+    }
+  ]
+}

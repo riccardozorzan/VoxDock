@@ -1,0 +1,22 @@
+.git
+.gitignore
+.gitattributes
+
+# Python caches / virtualenvs
+**/__pycache__
+**/*.py[cod]
+.venv
+venv
+env
+*.egg-info
+
+# Local configuration & secrets
+.env
+
+# Data is mounted as a volume at runtime, never baked into the image
+data
+
+# Logs / scratch
+*.log
+*.tmp
+.DS_Store

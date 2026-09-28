@@ -1,0 +1,94 @@
+name: local-tts-docker
+
+# ============================================================================
+#  GPU-accelerated dots.tts service.
+#     docker compose up -d --build          # start (first build downloads ~8 GB)
+#     docker compose exec tts python scripts/benchmark_test.py
+#
+#  Compose automatically reads the adjacent `.env` file for every ${VAR}
+#  interpolation below, so `.env.example` -> `.env` is all the configuration
+#  you normally need. The persistent `hf_cache` volume stops the ~4.4 GB of
+#  checkpoint weights from being re-downloaded on every rebuild.
+# ============================================================================
+services:
+  tts:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: dots-tts:latest
+    container_name: dots-tts
+    restart: unless-stopped
+
+    ports:
+      - "${TTS_BIND_HOST:-127.0.0.1}:${TTS_PORT:-8000}:8000"
+
+    environment:
+      # ---- model + runtime ----
+      TTS_MODEL_NAME: ${TTS_MODEL_NAME:-dots-studio/dots.tts-mf}
+      TTS_PRECISION: ${TTS_PRECISION:-bfloat16}
+      TTS_OPTIMIZE: ${TTS_OPTIMIZE:-true}
+      TTS_WARMUP_ON_OPTIMIZE: ${TTS_WARMUP_ON_OPTIMIZE:-true}
+      # Maximum TOTAL audio patches (reference prompt + generated audio).
+      # 128 * 160 ms ~= 20.5 s of audio per request <=> the <128-patch memory
+      # bucket that keeps peak VRAM at ~5.47 GB on a 6 GB RTX 4050.
+      TTS_MAX_GENERATE_LENGTH: ${TTS_MAX_GENERATE_LENGTH:-128}
+      # KV-cache size. Model default is 2048; raising it costs KV memory linearly.
+      TTS_MAX_SEQUENCE_LENGTH: ${TTS_MAX_SEQUENCE_LENGTH:-2048}
+      TTS_VOCODER_MERGE_STEPS: ${TTS_VOCODER_MERGE_STEPS:-4}
+
+      # ---- sampling defaults ----
+      TTS_NUM_STEPS: ${TTS_NUM_STEPS:-10}
+      TTS_GUIDANCE_SCALE: ${TTS_GUIDANCE_SCALE:-1.2}
+      TTS_SPEAKER_SCALE: ${TTS_SPEAKER_SCALE:-1.5}
+      TTS_SEED: ${TTS_SEED:-42}
+      TTS_LANGUAGE: ${TTS_LANGUAGE:-none}
+      TTS_NORMALIZE_TEXT: ${TTS_NORMALIZE_TEXT:-false}
+
+      # ---- acceptance thresholds ----
+      TTS_VRAM_LIMIT_GB: ${TTS_VRAM_LIMIT_GB:-5.5}
+      TTS_RTF_TARGET: ${TTS_RTF_TARGET:-0.5}
+
+      # ---- reference-audio cleaning / chunking ----
+      TTS_NOISE_PROP_DECREASE: ${TTS_NOISE_PROP_DECREASE:-0.85}
+      TTS_CHUNK_MAX_WORDS: ${TTS_CHUNK_MAX_WORDS:-35}
+      TTS_MAX_RETRIES: ${TTS_MAX_RETRIES:-3}
+
+      # ---- service plumbing ----
+      TTS_LOG_LEVEL: ${TTS_LOG_LEVEL:-info}
+      TTS_API_URL: ${TTS_API_URL:-http://localhost:8000}
+      HF_HOME: /root/.cache/huggingface
+      HF_TOKEN: ${HF_TOKEN:-}
+      # NOTE: expandable_segments lets the caching allocator return the ~200 MB
+      # of "reserved but unallocated" gaps that appear between the LLM step, the
+      # DiT KV cache and the BigVGAN vocoder. This used to be left OFF because
+      # cudagraph trees cannot checkpoint an expandable-segment allocator; the
+      # dots_tts compile options are rewritten to mode="default" in
+      # app/patches.disable_cudagraphs(), so that conflict is gone and the
+      # fragmentation can be reclaimed instead of OOM-ing.
+      PYTORCH_CUDA_ALLOC_CONF: ${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
+
+    volumes:
+      # Host project `data/` == container `/app/data` (references, chunks, output)
+      - ./data:/app/data
+      - hf_cache:/root/.cache/huggingface
+
+    # Large shared-memory segment for torch.compile / Triton workers.
+    shm_size: "2gb"
+
+    # NVIDIA GPU passthrough (spec Task 1.2): count 1, driver nvidia.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    # Keep the checkpoint pinned in VRAM: never swap it back to system RAM.
+    ulimits:
+      memlock: -1
+      stack: 67108864
+
+volumes:
+  hf_cache:
+    name: local_tts_hf_cache

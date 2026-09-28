@@ -1,0 +1,169 @@
+{
+  "timestamp": "2026-09-28T15:38:39+00:00",
+  "ok": true,
+  "thresholds": {
+    "peak_vram_limit_gb": 5.5,
+    "peak_vram_limit_mb": 5632.0,
+    "rtf_target_gen_over_audio": 0.5
+  },
+  "verdict": {
+    "peak_vram_ok": true,
+    "rtf_ok": true,
+    "http_ok": true
+  },
+  "cold_start": {
+    "script_wait_seconds": 0.05,
+    "server_checkpoint_load_seconds": 197.742,
+    "model_load_seconds": null
+  },
+  "environment": {
+    "api_url": "http://localhost:8000",
+    "model": {
+      "id": "dots-studio/dots.tts-mf",
+      "loaded": true,
+      "object": "model",
+      "precision": "bfloat16",
+      "optimize": true,
+      "warmup_on_optimize": true,
+      "max_generate_length": 128,
+      "default_num_steps": 2,
+      "default_guidance_scale": 1.2,
+      "default_seed": 42,
+      "cold_start_seconds": 197.742,
+      "audio_patch_seconds": 0.16,
+      "sample_rate": 48000
+    },
+    "gpu": {
+      "name": "NVIDIA GeForce RTX 4050 Laptop GPU",
+      "cuda_available": true,
+      "compute_capability": "8.9",
+      "torch_version": "2.8.0+cu128",
+      "cuda_version": "12.8",
+      "vram_total_mb": 5772.81,
+      "vram_allocated_mb": 5232.85,
+      "vram_free_mb": 354.94,
+      "vram_used_mb": 5417.88,
+      "vram_reserved_mb": 5278.0,
+      "vram_peak_allocated_mb": 5510.62,
+      "vram_peak_reserved_mb": 5560.0,
+      "error": null
+    }
+  },
+  "request": {
+    "test_text": "Questa è una prova di sintesi vocale pensata per misurare con precisione la velocità di generazione, l'uso della memoria video e la stabilità del modello. Il sole tramonta lentamente dietro le colline mentre una brezza leggera attraversa il prato: che cosa succederà domani? Forse arriverà davvero la pioggia, forse no.",
+    "test_text_words": 50,
+    "reference_audio": "/app/data/input/reference_clean.wav",
+    "reference_text_file": "/app/data/input/reference_clean.txt",
+    "reference_text_words": 25,
+    "num_steps": null,
+    "guidance_scale": null,
+    "seed": null,
+    "warmup_calls": 1,
+    "measured_calls": 3,
+    "poll_interval_seconds": 0.25
+  },
+  "results": {
+    "http_success": 3,
+    "http_failures": 0,
+    "audio_seconds_mean": 13.44,
+    "generation_seconds_mean": 6.234,
+    "rtf_mean": 0.4638,
+    "rtf_p50": 0.4688,
+    "rtf_p90": 0.4694,
+    "speed_factor_mean": 2.1567,
+    "peak_vram_mb": 5510.6,
+    "peak_vram_gb": 5.381,
+    "vram_free_mb_after": 334.94,
+    "lifetime_peak_vram_mb": 5510.62
+  },
+  "samples": [
+    {
+      "http_status": 200,
+      "client_wall_seconds": 6.3279,
+      "request_id": "5303e302aad3ca36",
+      "audio_seconds": 13.44,
+      "generation_seconds": 6.312,
+      "rtf": 0.4696,
+      "engine_rtf": 0.4694,
+      "speed_factor": 2.1293,
+      "peak_vram_mb": 5453.2,
+      "sample_rate": 48000.0,
+      "poller": {
+        "samples": 21,
+        "peak_allocated_mb": 5453.25,
+        "peak_reserved_mb": 5510.0,
+        "peak_lifetime_mb": 5510.62
+      },
+      "health_before": {
+        "vram_allocated_mb": 5233.03,
+        "vram_free_mb": 334.94,
+        "lifetime_peak_vram_mb": 5510.62
+      },
+      "health_after": {
+        "vram_allocated_mb": 5233.03,
+        "vram_free_mb": 334.94,
+        "vram_peak_allocated_mb": 5453.25,
+        "lifetime_peak_vram_mb": 5510.62
+      }
+    },
+    {
+      "http_status": 200,
+      "client_wall_seconds": 6.3142,
+      "request_id": "0002d9c9e8fd1b4d",
+      "audio_seconds": 13.44,
+      "generation_seconds": 6.301,
+      "rtf": 0.4688,
+      "engine_rtf": 0.4685,
+      "speed_factor": 2.1332,
+      "peak_vram_mb": 5453.2,
+      "sample_rate": 48000.0,
+      "poller": {
+        "samples": 22,
+        "peak_allocated_mb": 5453.25,
+        "peak_reserved_mb": 5510.0,
+        "peak_lifetime_mb": 5510.62
+      },
+      "health_before": {
+        "vram_allocated_mb": 5233.03,
+        "vram_free_mb": 334.94,
+        "lifetime_peak_vram_mb": 5510.62
+      },
+      "health_after": {
+        "vram_allocated_mb": 5233.03,
+        "vram_free_mb": 334.94,
+        "vram_peak_allocated_mb": 5453.25,
+        "lifetime_peak_vram_mb": 5510.62
+      }
+    },
+    {
+      "http_status": 200,
+      "client_wall_seconds": 6.0996,
+      "request_id": "356e11d45f218342",
+      "audio_seconds": 13.44,
+      "generation_seconds": 6.088,
+      "rtf": 0.453,
+      "engine_rtf": 0.4527,
+      "speed_factor": 2.2076,
+      "peak_vram_mb": 5453.2,
+      "sample_rate": 48000.0,
+      "poller": {
+        "samples": 21,
+        "peak_allocated_mb": 5453.25,
+        "peak_reserved_mb": 5510.0,
+        "peak_lifetime_mb": 5510.62
+      },
+      "health_before": {
+        "vram_allocated_mb": 5233.03,
+        "vram_free_mb": 334.94,
+        "lifetime_peak_vram_mb": 5510.62
+      },
+      "health_after": {
+        "vram_allocated_mb": 5233.03,
+        "vram_free_mb": 334.94,
+        "vram_peak_allocated_mb": 5453.25,
+        "lifetime_peak_vram_mb": 5510.62
+      }
+    }
+  ],
+  "output_wav": "/app/data/output/benchmark_output.wav"
+}
