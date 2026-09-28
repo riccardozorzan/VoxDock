@@ -1,4 +1,4 @@
-"""Containerised high-fidelity local TTS service built on ``dots.tts``.
+"""VoxDock — Containerised high-fidelity local TTS service built on ``dots.tts``.
 
 Package layout
 --------------
@@ -8,6 +8,14 @@ Package layout
   ``/v1/audio/speech``.
 """
 
-__all__ = ["__version__"]
-
+__title__ = "VoxDock"
+__package_name__ = "voxdock-tts"
 __version__ = "1.0.0"
+__description__ = "Containerised high-fidelity local TTS service built on dots.tts"
+
+__all__ = [
+    "__title__",
+    "__package_name__",
+    "__version__",
+    "__description__",
+]

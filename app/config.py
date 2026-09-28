@@ -1,7 +1,15 @@
 """Hardware & model configuration for the containerised dots.tts service.
 
-All values are environment driven so that the exact same code can be reused by
-the FastAPI server, the pre-processing scripts and the benchmark client.
+Resolution order for every setting (v3 Task 3.1)
+-----------------------------------------------
+1. **Environment variable** — always wins, so an operator can override a tuned
+   profile for a single run without editing anything.
+2. **``data/output/best_config.json``** — the profile written by
+   ``scripts/autotune.py`` after measuring this host.
+3. **Built-in default** — the values verified on the reference 6 GB RTX 4050.
+
+A missing, unreadable or malformed ``best_config.json`` is never fatal: the
+service falls back to the environment and defaults, and says so in ``/health``.
 
 This module is intentionally **torch-free**: every helper here is plain Python so
 that the client-side scripts can import it even on a host machine that has none
@@ -10,9 +18,12 @@ of the heavy ML dependencies installed.
 
 from __future__ import annotations
 
+import json
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any, Optional
 
 __all__ = [
     "PROJECT_ROOT",
@@ -23,7 +34,12 @@ __all__ = [
     "ProcessingSettings",
     "Settings",
     "settings",
+    "best_config",
+    "load_best_config",
 ]
+
+logger = logging.getLogger("dots_tts.api")
+
 
 # --------------------------------------------------------------------------- #
 #  Helpers
@@ -38,44 +54,121 @@ _TRUTHY = {"1", "true", "t", "yes", "y", "on"}
 _FALSY = {"0", "false", "f", "no", "n", "off", ""}
 
 
-def _env_str(name: str, default: str) -> str:
+
+
+
+
+
+
+
+
+# --------------------------------------------------------------------------- #
+#  Tuned-profile loader (v3 Task 3.1)
+# --------------------------------------------------------------------------- #
+BEST_CONFIG_PATH = DATA_DIR / "output" / "best_config.json"
+
+
+def load_best_config(path: Optional[Path] = None) -> dict[str, Any]:
+    """Read ``best_config.json`` and flatten it to a ``{setting: value}`` map.
+
+    Accepts either of the shapes ``scripts/autotune.py`` can emit::
+
+        {"settings": {"TTS_MAX_GENERATE_LENGTH": 128, ...}}
+        {"TTS_MAX_GENERATE_LENGTH": 128, ...}
+
+    Never raises: a missing or malformed file yields an empty map, because a
+    tuning artefact must never be able to stop the service from starting.
+    """
+    target = path or Path(os.environ.get("TTS_BEST_CONFIG") or BEST_CONFIG_PATH)
+    try:
+        if not target.exists():
+            return {}
+        payload = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("ignoring unreadable %s: %s", target, exc)
+        return {}
+    if not isinstance(payload, dict):
+        logger.warning("ignoring %s: expected a JSON object", target)
+        return {}
+    values = payload.get("settings", payload)
+    if not isinstance(values, dict):
+        logger.warning("ignoring %s: 'settings' is not an object", target)
+        return {}
+    return {str(k): v for k, v in values.items()}
+
+
+#: Flattened tuned profile; empty when the autotuner has never run here.
+best_config: dict[str, Any] = load_best_config()
+
+
+def _tuned(name: str) -> Any:
+    """Value from ``best_config.json``, or ``None`` when absent.
+
+    ``name`` is both the ``TTS_*`` environment variable and the key used in
+    ``best_config.json``, which is what lets one argument drive both tiers.
+    """
+    return best_config.get(name)
+
+
+def _str(name: str, default: str) -> str:
     value = os.environ.get(name)
-    if value is None or value.strip() == "":
-        return default
-    return value.strip()
+    if value is not None and value.strip() != "":
+        return value.strip()
+    tuned = _tuned(name)
+    if tuned is not None and str(tuned).strip() != "":
+        return str(tuned).strip()
+    return default
 
 
-def _env_bool(name: str, default: bool) -> bool:
+def _bool(name: str, default: bool) -> bool:
     raw = os.environ.get(name)
-    if raw is None:
-        return default
-    normalised = raw.strip().lower()
-    if normalised in _TRUTHY:
-        return True
-    if normalised in _FALSY:
-        return False
-    raise ValueError(f"{name} expects a boolean, got {raw!r}")
+    if raw is not None:
+        normalised = raw.strip().lower()
+        if normalised in _TRUTHY:
+            return True
+        if normalised in _FALSY:
+            return False
+        raise ValueError(f"{name} expects a boolean, got {raw!r}")
+    tuned = _tuned(name)
+    if tuned is not None:
+        if isinstance(tuned, bool):
+            return tuned
+        normalised = str(tuned).strip().lower()
+        if normalised in _TRUTHY:
+            return True
+        if normalised in _FALSY:
+            return False
+        logger.warning("best_config: %s=%r is not a boolean; using %r", name, tuned, default)
+    return default
 
 
-def _env_int(name: str, default: int) -> int:
+def _int(name: str, default: int) -> int:
     raw = os.environ.get(name)
-    if raw is None or raw.strip() == "":
-        return default
-    return int(raw.strip())
+    if raw is not None and raw.strip() != "":
+        return int(raw.strip())
+    tuned = _tuned(name)
+    if tuned is not None and str(tuned).strip() != "":
+        try:
+            return int(float(tuned))
+        except (TypeError, ValueError):
+            logger.warning("best_config: %s=%r is not an int; using %r", name, tuned, default)
+    return default
 
 
-def _env_optional_int(name: str) -> int | None:
+def _float(name: str, default: float) -> float:
     raw = os.environ.get(name)
-    if raw is None or raw.strip() == "":
-        return None
-    return int(raw.strip())
+    if raw is not None and raw.strip() != "":
+        return float(raw.strip())
+    tuned = _tuned(name)
+    if tuned is not None and str(tuned).strip() != "":
+        try:
+            return float(tuned)
+        except (TypeError, ValueError):
+            logger.warning(
+                "best_config: %s=%r is not a float; using %r", name, tuned, default
+            )
+    return default
 
-
-def _env_float(name: str, default: float) -> float:
-    raw = os.environ.get(name)
-    if raw is None or raw.strip() == "":
-        return default
-    return float(raw.strip())
 
 
 # --------------------------------------------------------------------------- #
@@ -195,40 +288,40 @@ class ModelSettings:
     @classmethod
     def from_env(cls) -> "ModelSettings":
         return cls(
-            model_name_or_path=_env_str("TTS_MODEL_NAME", cls.model_name_or_path),
-            precision=_env_str("TTS_PRECISION", cls.precision),
-            optimize=_env_bool("TTS_OPTIMIZE", cls.optimize),
-            warmup_on_optimize=_env_bool(
+            model_name_or_path=_str("TTS_MODEL_NAME", cls.model_name_or_path),
+            precision=_str("TTS_PRECISION", cls.precision),
+            optimize=_bool("TTS_OPTIMIZE", cls.optimize),
+            warmup_on_optimize=_bool(
                 "TTS_WARMUP_ON_OPTIMIZE", cls.warmup_on_optimize
             ),
-            max_generate_length=_env_int(
+            max_generate_length=_int(
                 "TTS_MAX_GENERATE_LENGTH", cls.max_generate_length
             ),
-            max_sequence_length=_env_int(
+            max_sequence_length=_int(
                 "TTS_MAX_SEQUENCE_LENGTH", cls.max_sequence_length
             ),
-            vocoder_merge_steps=_env_int(
+            vocoder_merge_steps=_int(
                 "TTS_VOCODER_MERGE_STEPS", cls.vocoder_merge_steps
             ),
-            low_vram_patches=_env_bool(
+            low_vram_patches=_bool(
                 "TTS_LOW_VRAM_PATCHES", cls.low_vram_patches
             ),
-            vocoder_chunk_patches=_env_int(
+            vocoder_chunk_patches=_int(
                 "TTS_VOCODER_CHUNK_PATCHES", cls.vocoder_chunk_patches
             ),
-            device=_env_str("TTS_DEVICE", cls.device),
-            default_num_steps=_env_int("TTS_NUM_STEPS", cls.default_num_steps),
-            default_guidance_scale=_env_float(
+            device=_str("TTS_DEVICE", cls.device),
+            default_num_steps=_int("TTS_NUM_STEPS", cls.default_num_steps),
+            default_guidance_scale=_float(
                 "TTS_GUIDANCE_SCALE", cls.default_guidance_scale
             ),
-            default_speaker_scale=_env_float(
+            default_speaker_scale=_float(
                 "TTS_SPEAKER_SCALE", cls.default_speaker_scale
             ),
-            default_seed=_env_int("TTS_SEED", cls.default_seed),
-            language=_env_str("TTS_LANGUAGE", cls.language),
-            normalize_text=_env_bool("TTS_NORMALIZE_TEXT", cls.normalize_text),
-            vram_limit_gb=_env_float("TTS_VRAM_LIMIT_GB", cls.vram_limit_gb),
-            rtf_target=_env_float("TTS_RTF_TARGET", cls.rtf_target),
+            default_seed=_int("TTS_SEED", cls.default_seed),
+            language=_str("TTS_LANGUAGE", cls.language),
+            normalize_text=_bool("TTS_NORMALIZE_TEXT", cls.normalize_text),
+            vram_limit_gb=_float("TTS_VRAM_LIMIT_GB", cls.vram_limit_gb),
+            rtf_target=_float("TTS_RTF_TARGET", cls.rtf_target),
         )
 
 
@@ -250,14 +343,14 @@ class APISettings:
     @classmethod
     def from_env(cls) -> "APISettings":
         return cls(
-            title=_env_str("TTS_API_TITLE", cls.title),
-            version=_env_str("TTS_API_VERSION", cls.version),
-            host=_env_str("TTS_HOST", cls.host),
-            port=_env_int("TTS_PORT", cls.port),
-            api_url=_env_str("TTS_API_URL", cls.api_url).rstrip("/"),
-            request_timeout_s=_env_float("TTS_REQUEST_TIMEOUT", cls.request_timeout_s),
-            connect_timeout_s=_env_float("TTS_CONNECT_TIMEOUT", cls.connect_timeout_s),
-            max_upload_mb=_env_int("TTS_MAX_UPLOAD_MB", cls.max_upload_mb),
+            title=_str("TTS_API_TITLE", cls.title),
+            version=_str("TTS_API_VERSION", cls.version),
+            host=_str("TTS_HOST", cls.host),
+            port=_int("TTS_PORT", cls.port),
+            api_url=_str("TTS_API_URL", cls.api_url).rstrip("/"),
+            request_timeout_s=_float("TTS_REQUEST_TIMEOUT", cls.request_timeout_s),
+            connect_timeout_s=_float("TTS_CONNECT_TIMEOUT", cls.connect_timeout_s),
+            max_upload_mb=_int("TTS_MAX_UPLOAD_MB", cls.max_upload_mb),
         )
 
 
@@ -291,20 +384,20 @@ class ProcessingSettings:
     @classmethod
     def from_env(cls) -> "ProcessingSettings":
         return cls(
-            target_sample_rate=_env_int("TTS_SAMPLE_RATE", cls.target_sample_rate),
-            noise_prop_decrease=_env_float(
+            target_sample_rate=_int("TTS_SAMPLE_RATE", cls.target_sample_rate),
+            noise_prop_decrease=_float(
                 "TTS_NOISE_PROP_DECREASE", cls.noise_prop_decrease
             ),
-            stationary_noise=_env_bool("TTS_STATIONARY_NOISE", cls.stationary_noise),
-            reference_min_seconds=_env_float(
+            stationary_noise=_bool("TTS_STATIONARY_NOISE", cls.stationary_noise),
+            reference_min_seconds=_float(
                 "TTS_REF_MIN_SECONDS", cls.reference_min_seconds
             ),
-            reference_max_seconds=_env_float(
+            reference_max_seconds=_float(
                 "TTS_REF_MAX_SECONDS", cls.reference_max_seconds
             ),
-            chunk_max_words=_env_int("TTS_CHUNK_MAX_WORDS", cls.chunk_max_words),
-            words_per_second=_env_float("TTS_WORDS_PER_SECOND", cls.words_per_second),
-            max_retries=_env_int("TTS_MAX_RETRIES", cls.max_retries),
+            chunk_max_words=_int("TTS_CHUNK_MAX_WORDS", cls.chunk_max_words),
+            words_per_second=_float("TTS_WORDS_PER_SECOND", cls.words_per_second),
+            max_retries=_int("TTS_MAX_RETRIES", cls.max_retries),
         )
 
 
@@ -325,7 +418,7 @@ class Settings:
             model=ModelSettings.from_env(),
             api=APISettings.from_env(),
             processing=ProcessingSettings.from_env(),
-            log_level=_env_str("TTS_LOG_LEVEL", "info"),
+            log_level=_str("TTS_LOG_LEVEL", "info"),
         )
 
     def speech_url(self) -> str:
