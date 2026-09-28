@@ -46,7 +46,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.config import settings  # noqa: E402
+from app.config import load_best_config, settings  # noqa: E402
 from app.utils import now_iso, wav_duration_seconds  # noqa: E402
 
 SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
@@ -144,6 +144,21 @@ def resolve_max_words(
     if requested is not None and str(requested).lower() != "auto":
         return int(requested), f"explicit --max-words={requested}"
 
+    # A tuned profile may carry a measured chunk size (v3 Task 5.1). It wins
+    # over the VRAM-derived estimate because it was measured end to end on this
+    # host with this reference, not derived from patch arithmetic.
+    tuned = load_best_config().get("TTS_CHUNK_MAX_WORDS")
+    if tuned is not None:
+        try:
+            tuned_words = int(float(tuned))
+        except (TypeError, ValueError):
+            tuned_words = 0
+        if tuned_words > 0:
+            return tuned_words, (
+                f"best_config.json TTS_CHUNK_MAX_WORDS={tuned_words} "
+                "(measured by scripts/autotune.py)"
+            )
+
     model = (health or {}).get("model") or {}
     total_patches = int(
         model.get("max_generate_length") or settings.model.max_generate_length
@@ -196,11 +211,32 @@ def _header_float(headers, name: str) -> Optional[float]:
         return None
 
 
+class HttpFailure(RuntimeError):
+    """A non-200 response, tagged so OOM can be told apart from other errors."""
+
+    def __init__(self, status_code: int, body: str) -> None:
+        super().__init__(f"HTTP {status_code}: {body}")
+        self.status_code = status_code
+        self.body = body
+
+    @property
+    def is_out_of_memory(self) -> bool:
+        """True when the server flagged an OOM worth splitting a chunk for.
+
+        The service answers 503 with ``error=out_of_memory``; the substring
+        check is a fallback for a proxy that rewrites the body.
+        """
+        if self.status_code == 503 and "out_of_memory" in self.body:
+            return True
+        return "out of memory" in self.body.lower()
+
+
 def post_chunk(
     *,
     api_url: str,
-    reference_audio: Path,
-    reference_text: str,
+    reference_audio: Optional[Path],
+    reference_text: Optional[str],
+    speaker_id: Optional[str],
     text: str,
     num_steps: Optional[int],
     guidance_scale: Optional[float],
@@ -211,11 +247,28 @@ def post_chunk(
     retries: int,
     backoff: float,
 ) -> tuple[dict, bytes]:
-    """POST a single chunk with retries; returns ``(metrics, wav_bytes)``."""
+    """POST a single chunk with retries; returns ``(metrics, wav_bytes)``.
+
+    Sends ``speaker_id`` when the voice was registered and only uploads the
+    reference WAV otherwise (v3 Task 5.2), so a 40-chunk job uploads 656 KB
+    once instead of 40 times.
+    """
     import requests
 
     url = f"{api_url.rstrip('/')}{settings.api.speech_path}"
-    form: dict[str, str] = {"text": text, "reference_text": reference_text}
+    form: dict[str, str] = {"text": text}
+    files = None
+    if speaker_id:
+        form["speaker_id"] = speaker_id
+    else:
+        form["reference_text"] = reference_text or ""
+        files = {
+            "reference_audio": (
+                reference_audio.name,
+                reference_audio.read_bytes(),
+                "audio/wav",
+            )
+        }
     if num_steps is not None:
         form["num_steps"] = str(num_steps)
     if guidance_scale is not None:
@@ -230,23 +283,14 @@ def post_chunk(
     last_error: Optional[Exception] = None
     for attempt in range(1, max(1, retries) + 1):
         try:
-            with open(reference_audio, "rb") as handle:
-                response = requests.post(
-                    url,
-                    files={
-                        "reference_audio": (
-                            reference_audio.name,
-                            handle,
-                            "audio/wav",
-                        )
-                    },
-                    data=form,
-                    timeout=timeout,
-                )
+            response = requests.post(
+                url,
+                files=files,
+                data=form,
+                timeout=timeout,
+            )
             if response.status_code != 200:
-                raise RuntimeError(
-                    f"HTTP {response.status_code}: {response.text[:300]}"
-                )
+                raise HttpFailure(response.status_code, response.text[:300])
             if not response.content:
                 raise RuntimeError("server returned an empty audio body")
 
@@ -265,6 +309,9 @@ def post_chunk(
             return metrics, response.content
         except Exception as exc:  # noqa: BLE001 - retry on any transient failure
             last_error = exc
+            # An OOM will not fix itself on a retry; the caller halves the chunk.
+            if isinstance(exc, HttpFailure) and exc.is_out_of_memory:
+                raise
             if attempt < max(1, retries):
                 wait = backoff * attempt
                 print(
@@ -275,6 +322,199 @@ def post_chunk(
                 time.sleep(wait)
 
     raise RuntimeError(f"chunk failed after {retries} attempt(s): {last_error}")
+
+
+
+def synthesize_with_split(
+    *,
+    api_url: str,
+    reference_audio: Optional[Path],
+    reference_text: Optional[str],
+    speaker_id: Optional[str],
+    text: str,
+    max_splits: int,
+    out_path: Path,
+    post_kwargs: dict,
+) -> tuple[dict, list[Path], list[str]]:
+    """Synthesise ``text``, halving it on OOM until it fits (v3 Task 5.2).
+
+    Returns ``(aggregate_metrics, part_paths, notes)``. Each generated part goes
+    to its own WAV so the final stitch is unchanged. Splitting stops at four
+    words, below which there is nothing left to halve.
+    """
+    notes: list[str] = []
+    parts: list[Path] = []
+    agg: dict = {
+        "audio_seconds": 0.0,
+        "generation_seconds": 0.0,
+        "rtf": None,
+        "peak_vram_mb": 0.0,
+        "parts": 0,
+        "splits": 0,
+    }
+    queue: list[str] = [text]
+    depth = 0
+    timeout = float(post_kwargs.get("timeout", 120.0))
+
+    while queue:
+        piece = queue.pop(0)
+        # The first part of an unsplit chunk keeps the caller's filename; any
+        # part after a split is numbered so the order is obvious on disk.
+        target = out_path if not parts and not queue else out_path.with_name(
+            f"{out_path.stem}_part{len(parts):03d}{out_path.suffix}"
+        )
+        try:
+            metrics, payload = post_chunk(
+                api_url=api_url,
+                reference_audio=reference_audio,
+                reference_text=reference_text,
+                speaker_id=speaker_id,
+                text=piece,
+                **post_kwargs,
+            )
+        except HttpFailure as exc:
+            words = piece.split()
+            if not exc.is_out_of_memory or depth >= max_splits or len(words) < 4:
+                raise
+            depth += 1
+            middle = len(words) // 2
+            head, tail = " ".join(words[:middle]), " ".join(words[middle:])
+            notes.append(
+                f"OOM at {len(words)} words -> split into {middle} + "
+                f"{len(words) - middle} words (depth {depth})"
+            )
+            print(
+                f"      ! out of memory on {len(words)} words; splitting into "
+                f"{middle} + {len(words) - middle} and retrying "
+                f"(depth {depth}/{max_splits})",
+                file=sys.stderr,
+            )
+            if not clear_server_cache(api_url, timeout):
+                notes.append("cache clear request failed")
+            # Keep order: head then tail, both ahead of anything still queued.
+            queue.insert(0, tail)
+            queue.insert(0, head)
+            continue
+
+        target.write_bytes(payload)
+        parts.append(target)
+        agg["parts"] += 1
+        agg["audio_seconds"] += float(metrics.get("audio_seconds") or 0.0)
+        agg["generation_seconds"] += float(metrics.get("generation_seconds") or 0.0)
+        agg["peak_vram_mb"] = max(
+            float(agg["peak_vram_mb"]), float(metrics.get("peak_vram_mb") or 0.0)
+        )
+
+    if agg["audio_seconds"] > 0 and agg["generation_seconds"] > 0:
+        agg["rtf"] = round(agg["generation_seconds"] / agg["audio_seconds"], 4)
+    agg["splits"] = depth
+    return agg, parts, notes
+
+
+def register_speaker(
+    *,
+    api_url: str,
+    reference_audio: Path,
+    reference_text: str,
+    speaker_id: str,
+    timeout: float,
+) -> str:
+    """Register the voice once, return its id, or ``""`` to fall back (Task 5.2).
+
+    A registration failure is never fatal: the caller then uploads the reference
+    with every chunk exactly as before.
+    """
+    import requests
+
+    url = f"{api_url.rstrip('/')}/v1/speakers/register"
+    try:
+        response = requests.post(
+            url,
+            files={
+                "reference_audio": (
+                    reference_audio.name,
+                    reference_audio.read_bytes(),
+                    "audio/wav",
+                )
+            },
+            data={
+                "reference_text": reference_text,
+                "speaker_id": speaker_id,
+                "overwrite": "true",
+            },
+            timeout=timeout,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(
+            f"[process_txt] speaker registration failed ({exc}); falling back "
+            "to uploading the reference with every chunk",
+            file=sys.stderr,
+        )
+        return ""
+    if response.status_code not in (200, 201):
+        print(
+            f"[process_txt] registration returned HTTP {response.status_code}: "
+            f"{response.text[:200]}; falling back to per-chunk upload",
+            file=sys.stderr,
+        )
+        return ""
+    try:
+        payload = response.json()
+    except ValueError:
+        return ""
+    registered = str(payload.get("id") or "")
+    if registered:
+        print(
+            f"[process_txt] speaker registered as {registered!r} "
+            f"({payload.get('audio_bytes', 0) / 1024:.0f} KB, "
+            f"{payload.get('duration_seconds', 0):.1f}s) - reused for every chunk"
+        )
+    return registered
+
+
+def clear_server_cache(api_url: str, timeout: float) -> bool:
+    """Ask the service to drop prompt latents and free cached CUDA blocks."""
+    import requests
+
+    try:
+        response = requests.post(
+            f"{api_url.rstrip('/')}/v1/admin/clear-cache", timeout=timeout
+        )
+    except Exception:  # noqa: BLE001 - best effort
+        return False
+    return response.status_code == 200
+
+
+def normalize_loudness(
+    source: Path,
+    destination: Path,
+    *,
+    lufs: float = -16.0,
+    tp: float = -1.5,
+    lra: float = 11.0,
+) -> Optional[list[str]]:
+    """EBU R128 normalisation (v3 Task 5.3); ``None`` when ffmpeg is missing.
+
+    A second pass over the stitched file, so every chunk of a long-form job
+    ends up at one consistent level.
+    """
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        print(
+            "[process_txt] ffmpeg not found - skipping EBU R128 normalisation",
+            file=sys.stderr,
+        )
+        return None
+    command = [
+        ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
+        "-i", str(source),
+        "-af", f"loudnorm=I={lufs}:LRA={lra}:TP={tp}",
+        "-ar", "48000",
+        "-ac", "1",
+        str(destination),
+    ]
+    subprocess.run(command, check=True)
+    return command
 
 
 def concat_chunks(
@@ -369,6 +609,36 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--api-url", default=settings.api.api_url, help="Server base URL.")
+    parser.add_argument(
+        "--no-normalize",
+        action="store_true",
+        help="Skip the EBU R128 (-16 LUFS) pass over the stitched file.",
+    )
+    parser.add_argument(
+        "--lufs",
+        type=float,
+        default=-16.0,
+        help="Integrated loudness target for the normalisation pass.",
+    )
+    parser.add_argument(
+        "--max-splits",
+        type=int,
+        default=3,
+        help="How many times a chunk may be halved after an OOM (Task 5.2).",
+    )
+    parser.add_argument(
+        "--speaker-id",
+        default=None,
+        help="Name to register the reference voice under (default: input stem).",
+    )
+    parser.add_argument(
+        "--no-speaker-cache",
+        action="store_true",
+        help=(
+            "Upload the reference WAV with every chunk instead of registering "
+            "it once and reusing the id."
+        ),
+    )
     parser.add_argument("--num-steps", type=int, default=None, help="Omit to use the artifact default.")
     parser.add_argument("--guidance-scale", type=float, default=None)
     parser.add_argument("--seed", type=int, default=None)
@@ -500,6 +770,29 @@ def main(argv: list[str] | None = None) -> int:
     generated_words = 0
     job_started = time.time()
 
+    # Register the voice once so each chunk sends a ~20 byte id instead of a
+    # 656 KB WAV (v3 Task 5.2). Falls back silently to per-chunk upload.
+    speaker_id = ""
+    if not args.no_speaker_cache:
+        speaker_id = register_speaker(
+            api_url=args.api_url,
+            reference_audio=reference_audio,
+            reference_text=reference_text,
+            speaker_id=args.speaker_id or input_path.stem,
+            timeout=args.timeout,
+        )
+
+    post_kwargs = {
+        "num_steps": args.num_steps,
+        "guidance_scale": args.guidance_scale,
+        "seed": args.seed,
+        "language": args.language,
+        "normalize_text": args.normalize_text or None,
+        "timeout": args.timeout,
+        "retries": args.retries,
+        "backoff": args.backoff,
+    }
+
     for index, chunk_text in enumerate(chunks, start=1):
         chunk_path = chunks_dir / f"chunk_{index:03d}.wav"
         chunk_paths.append(chunk_path)
@@ -527,19 +820,15 @@ def main(argv: list[str] | None = None) -> int:
 
         chunk_started = time.time()
         try:
-            metrics, audio_bytes = post_chunk(
+            agg, part_paths, notes = synthesize_with_split(
                 api_url=args.api_url,
                 reference_audio=reference_audio,
                 reference_text=reference_text,
+                speaker_id=speaker_id or None,
                 text=chunk_text,
-                num_steps=args.num_steps,
-                guidance_scale=args.guidance_scale,
-                seed=args.seed,
-                language=args.language,
-                normalize_text=args.normalize_text or None,
-                timeout=args.timeout,
-                retries=args.retries,
-                backoff=args.backoff,
+                max_splits=args.max_splits,
+                out_path=chunk_path,
+                post_kwargs=post_kwargs,
             )
         except Exception as exc:  # noqa: BLE001 - report and continue with the rest
             failed += 1
@@ -547,13 +836,26 @@ def main(argv: list[str] | None = None) -> int:
             results.append({"index": index, "words": words, "error": str(exc)})
             continue
 
-        chunk_path.write_bytes(audio_bytes)
+        # A chunk that was split produced several parts; the final stitch must
+        # include all of them, in order.
+        if len(part_paths) > 1:
+            chunk_paths[-1:] = list(part_paths)
         wall_seconds = time.time() - chunk_started
         audio_seconds = float(
-            metrics.get("audio_seconds") or wav_duration_seconds(chunk_path)
+            agg.get("audio_seconds") or wav_duration_seconds(chunk_path)
         )
         generated_audio_seconds += audio_seconds
         generated_words += words
+        metrics = {
+            "audio_seconds": round(audio_seconds, 3),
+            "generation_seconds": round(float(agg["generation_seconds"]), 3),
+            "rtf": agg.get("rtf"),
+            "peak_vram_mb": round(float(agg["peak_vram_mb"]), 1)
+            if agg["peak_vram_mb"]
+            else None,
+            "parts": agg["parts"],
+            "splits": agg["splits"],
+        }
 
         rtf = metrics.get("rtf")
         eta_text = ""
@@ -573,6 +875,11 @@ def main(argv: list[str] | None = None) -> int:
                 if metrics.get("peak_vram_mb")
                 else "){}".format(eta_text)
             )
+            + (
+                f"  [split into {metrics['parts']} parts after OOM]"
+                if metrics.get("splits")
+                else ""
+            )
         )
         results.append(
             {
@@ -582,6 +889,7 @@ def main(argv: list[str] | None = None) -> int:
                 "path": str(chunk_path),
                 "audio_seconds": round(audio_seconds, 3),
                 "wall_seconds": round(wall_seconds, 3),
+                "oom_notes": notes,
                 **{k: v for k, v in metrics.items() if k != "http_status"},
             }
         )
@@ -610,6 +918,23 @@ def main(argv: list[str] | None = None) -> int:
             gap_seconds=args.gap,
             sample_rate=sample_rate,
         )
+        # EBU R128 as a second pass, so chunks stay bit-identical through the
+        # -c copy stitch and only the finished file is re-encoded (v3 Task 5.3).
+        if not args.no_normalize:
+            raw_path = output_path.with_name(f"{output_path.stem}_raw.wav")
+            output_path.replace(raw_path)
+            try:
+                loudnorm_command = normalize_loudness(
+                    raw_path, output_path, lufs=args.lufs
+                )
+            finally:
+                raw_path.unlink(missing_ok=True)
+            if loudnorm_command:
+                concat_command = loudnorm_command
+                print(
+                    f"  loudness         : EBU R128 {args.lufs} LUFS "
+                    "(TP -1.5, LRA 11)"
+                )
         final_seconds = wav_duration_seconds(output_path)
         expected_seconds = generated_audio_seconds + gap_total
         print(f"  output           : {output_path}")
@@ -681,6 +1006,10 @@ def main(argv: list[str] | None = None) -> int:
         },
         "chunks": results,
         "ffmpeg_command": concat_command,
+        "speaker_id": speaker_id or None,
+        "speaker_reused": bool(speaker_id),
+        "loudnorm_lufs": None if args.no_normalize else args.lufs,
+        "oom_splits": sum(int(r.get("splits") or 0) for r in results),
     }
 
     report_path = (

@@ -392,7 +392,9 @@ class ProcessingSettings:
     words_per_second: float = 2.5
     max_retries: int = 3
     retry_backoff_s: float = 2.0
-    concat_gap_seconds: float = 0.12
+    # v3 Task 5.3 asks for 300 ms between paragraph chunks: long enough to read
+    # as a break, short enough not to pad a 20-minute file with dead air.
+    concat_gap_seconds: float = 0.30
 
     @classmethod
     def from_env(cls) -> "ProcessingSettings":
