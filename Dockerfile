@@ -40,7 +40,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     TTS_OPTIMIZE=true \
     TTS_WARMUP_ON_OPTIMIZE=true \
     TTS_MAX_GENERATE_LENGTH=128 \
-    TTS_MAX_SEQUENCE_LENGTH=2048 \
+    TTS_MAX_SEQUENCE_LENGTH=1024 \
     TTS_VRAM_LIMIT_GB=5.5
 
 # ---- System dependencies ---------------------------------------------------

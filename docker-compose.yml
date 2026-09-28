@@ -39,12 +39,22 @@ services:
       # 128 * 160 ms ~= 20.5 s of audio per request <=> the <128-patch memory
       # bucket that keeps peak VRAM at ~5.47 GB on a 6 GB RTX 4050.
       TTS_MAX_GENERATE_LENGTH: ${TTS_MAX_GENERATE_LENGTH:-128}
-      # KV-cache size. Model default is 2048; raising it costs KV memory linearly.
-      TTS_MAX_SEQUENCE_LENGTH: ${TTS_MAX_SEQUENCE_LENGTH:-2048}
+      # KV-cache size. Model default is 2048; halving it to 1024 saves ~170 MB
+      # of VRAM, which is part of what makes the 128-patch budget reachable on
+      # a 6 GB card. Keep this default in step with app/config.py.
+      TTS_MAX_SEQUENCE_LENGTH: ${TTS_MAX_SEQUENCE_LENGTH:-1024}
       TTS_VOCODER_MERGE_STEPS: ${TTS_VOCODER_MERGE_STEPS:-4}
+      # Low-VRAM patches (app/patches.py). NOT optional on a 6 GB card; see
+      # .env.example. These must be forwarded here or setting them in `.env`
+      # is silently ignored by the container.
+      TTS_LOW_VRAM_PATCHES: ${TTS_LOW_VRAM_PATCHES:-true}
+      TTS_VOCODER_CHUNK_PATCHES: ${TTS_VOCODER_CHUNK_PATCHES:-12}
 
       # ---- sampling defaults ----
-      TTS_NUM_STEPS: ${TTS_NUM_STEPS:-10}
+      # 2 is the MeanFlow default AND sizes the DiT KV cache: at 4 steps the
+      # cache doubles and the 128-patch budget above OOMs. Keep in step with
+      # app/config.py.
+      TTS_NUM_STEPS: ${TTS_NUM_STEPS:-2}
       TTS_GUIDANCE_SCALE: ${TTS_GUIDANCE_SCALE:-1.2}
       TTS_SPEAKER_SCALE: ${TTS_SPEAKER_SCALE:-1.5}
       TTS_SEED: ${TTS_SEED:-42}
@@ -57,7 +67,12 @@ services:
 
       # ---- reference-audio cleaning / chunking ----
       TTS_NOISE_PROP_DECREASE: ${TTS_NOISE_PROP_DECREASE:-0.85}
+      TTS_STATIONARY_NOISE: ${TTS_STATIONARY_NOISE:-true}
+      TTS_SAMPLE_RATE: ${TTS_SAMPLE_RATE:-48000}
+      TTS_REF_MIN_SECONDS: ${TTS_REF_MIN_SECONDS:-5}
+      TTS_REF_MAX_SECONDS: ${TTS_REF_MAX_SECONDS:-15}
       TTS_CHUNK_MAX_WORDS: ${TTS_CHUNK_MAX_WORDS:-35}
+      TTS_WORDS_PER_SECOND: ${TTS_WORDS_PER_SECOND:-2.5}
       TTS_MAX_RETRIES: ${TTS_MAX_RETRIES:-3}
 
       # ---- service plumbing ----
