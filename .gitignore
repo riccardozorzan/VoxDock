@@ -19,6 +19,10 @@ data/speakers/
 data/output/*.wav
 data/output/*.raw.wav
 data/output/*_raw.wav
+# Per-candidate benchmark dumps written by autotune.py for crash-resume. The
+# consolidated result lives in data/output/tuning_report.json, which is tracked;
+# these 30+ intermediates are regenerable and only clutter the tree.
+data/output/tune_*.json
 
 # Python
 __pycache__/

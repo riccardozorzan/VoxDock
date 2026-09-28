@@ -34,6 +34,14 @@ COMPOSE_PROJECT = "voxdock"
 #: volume, so changing it would orphan the existing cache and force a full
 #: re-download of every weight on the next build.
 HF_CACHE_VOLUME = "local_tts_hf_cache"
+#: Persistent volume holding torch.compile's generated kernels (~180 MB).
+#:
+#: Inductor writes these to ``/tmp`` by default, which is not a mounted path, so
+#: every ``docker compose up --force-recreate`` re-pays ~105 s of Inductor
+#: codegen. Persisting them makes the warmup reuse the cached kernels and is what
+#: keeps the autotuner's many restarts affordable. Losing this volume is harmless:
+#: it only costs one slow, re-compiling startup.
+INDUCTOR_CACHE_VOLUME = "voxdock_inductor_cache"
 #: Logger namespace for this project's own log lines.
 #:
 #: Deliberately *not* ``dots_tts.*``: that is the upstream library's namespace,
@@ -49,5 +57,6 @@ __all__ = [
     "CONTAINER_NAME",
     "COMPOSE_PROJECT",
     "HF_CACHE_VOLUME",
+    "INDUCTOR_CACHE_VOLUME",
     "LOG_NAMESPACE",
 ]

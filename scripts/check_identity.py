@@ -25,6 +25,7 @@ from app import (  # noqa: E402
     CONTAINER_NAME,
     HF_CACHE_VOLUME,
     IMAGE_NAME,
+    INDUCTOR_CACHE_VOLUME,
     __title__,
 )
 
@@ -37,6 +38,7 @@ EXPECTED_COMPOSE_DEFAULTS = {
     "VOXDOCK_IMAGE": IMAGE_NAME,
     "VOXDOCK_CONTAINER": CONTAINER_NAME,
     "VOXDOCK_HF_CACHE_VOLUME": HF_CACHE_VOLUME,
+    "VOXDOCK_INDUCTOR_CACHE_VOLUME": INDUCTOR_CACHE_VOLUME,
 }
 
 #: Strings that must no longer appear in the deployment files, left over from
@@ -88,6 +90,7 @@ def main() -> int:
     print(f"  container  : {CONTAINER_NAME}")
     print(f"  compose    : {COMPOSE_PROJECT}")
     print(f"  hf cache   : {HF_CACHE_VOLUME}")
+    print(f"  inductor   : {INDUCTOR_CACHE_VOLUME}")
     if problems:
         print("\nFAILED:", file=sys.stderr)
         for problem in problems:

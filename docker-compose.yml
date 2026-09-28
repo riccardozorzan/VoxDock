@@ -88,11 +88,21 @@ services:
       # app/patches.disable_cudagraphs(), so that conflict is gone and the
       # fragmentation can be reclaimed instead of OOM-ing.
       PYTORCH_CUDA_ALLOC_CONF: ${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
+      # Persist torch.compile's generated kernels (~180 MB). Inductor writes these
+      # under /tmp by default, which is NOT a volume, so every recreate re-pays
+      # ~105 s of Inductor codegen. Pinning it to a mounted path makes restarts
+      # reuse the compiled kernels; this is the single biggest startup cost.
+      # Invalidate by bumping this value if kernels are ever suspected stale.
+      TORCHINDUCTOR_CACHE_DIR: /app/.cache/torchinductor
 
     volumes:
       # Host project `data/` == container `/app/data` (references, chunks, output)
       - ./data:/app/data
       - hf_cache:/root/.cache/huggingface
+      # Compiled-kernel cache. A named volume, NOT a bind mount: the contents are
+      # large, machine-specific and fully regenerable, so they should not land in
+      # the working tree.
+      - inductor_cache:/app/.cache/torchinductor
 
     # Large shared-memory segment for torch.compile / Triton workers.
     shm_size: "2gb"
@@ -118,3 +128,9 @@ volumes:
     # orphan the cache and force a full re-download. See HF_CACHE_VOLUME in
     # app/__init__.py.
     name: ${VOXDOCK_HF_CACHE_VOLUME:-local_tts_hf_cache}
+  inductor_cache:
+    # torch.compile kernel cache (~180 MB). Created in the compose project
+    # namespace, so `docker compose down` discards it but `--force-recreate`
+    # (what autotune.py uses) keeps it - that is the whole point. Safe to
+    # delete: the only cost is one slow, re-compiling startup.
+    name: ${VOXDOCK_INDUCTOR_CACHE_VOLUME:-voxdock_inductor_cache}
