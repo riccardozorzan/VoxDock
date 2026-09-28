@@ -32,7 +32,7 @@ if str(PROJECT_ROOT) not in sys.path:  # allow `python scripts/clean_audio.py`
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.config import settings  # noqa: E402
-from app.utils import now_iso, wav_duration_seconds, write_wav  # noqa: E402
+from app.utils import now_iso, write_wav  # noqa: E402
 
 # One dots.tts audio latent patch ~= 160 ms (patch_size * hop_size / 48 kHz).
 DEFAULT_PATCH_SECONDS = 0.16
