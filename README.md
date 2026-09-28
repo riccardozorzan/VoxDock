@@ -37,6 +37,13 @@ docker compose exec tts python scripts/process_txt.py \
 Then open <http://127.0.0.1:8000/docs> for the OpenAPI UI and
 `data/output/benchmark_report.json` for the benchmark verdict.
 
+`process_txt.py` needs no flags to get the full v3 behaviour: it registers the
+voice once and reuses the id, inserts 300 ms between chunks, normalises the
+finished file to −16 LUFS (EBU R128), halves any chunk that hits an OOM and
+retries it, and takes its chunk size from `best_config.json` when one exists.
+Use `--no-speaker-cache`, `--no-normalize`, `--lufs` or `--max-words` to opt out
+or override.
+
 ---
 
 ## 2. Layout
@@ -48,21 +55,23 @@ Then open <http://127.0.0.1:8000/docs> for the OpenAPI UI and
 ├── .env.example               # every tunable (copied to .env)
 ├── requirements.txt
 ├── app/
-│   ├── config.py              # env-driven settings (torch-free)
+│   ├── config.py              # settings: env -> best_config.json -> defaults
 │   ├── patches.py             # low-VRAM patches for dots.tts (6 GB cards)
+│   ├── speakers.py            # speaker registry (register once, reuse by id)
 │   ├── utils.py               # GPU telemetry, WAV buffers, temp files
 │   └── main.py                # FastAPI service + dots.tts runtime loader
 ├── scripts/
 │   ├── clean_audio.py         # denoise + validate the reference clip
-│   ├── process_txt.py         # chunk -> POST -> FFmpeg concat
+│   ├── process_txt.py         # chunk -> POST -> FFmpeg concat -> loudnorm
 │   ├── benchmark_test.py      # cold start / peak VRAM / RTF benchmark
-│   ├── tune_settings.py       # autotuner: sweep settings, emit the best .env
+│   ├── autotune.py            # sweep model/precision/settings -> best_config.json
 │   └── test_api.py            # one-shot sanity check
 └── data/
     ├── references/            # raw reference .wav + transcript .txt
+    ├── speakers/              # registered voices (id -> .wav + .txt), gitignored
     ├── input/                 # input .txt + reference_clean.wav + reference_set.json
     ├── temp_chunks/           # intermediate chunk WAVs + file_list.txt
-    └── output/                # final WAVs + benchmark/tuning reports
+    └── output/                # final WAVs + benchmark/tuning/best_config JSON
 ```
 
 
@@ -108,8 +117,9 @@ check waits for the *engine*, not just the ASGI process).
 | field | type | required | default |
 |---|---|---|---|
 | `text` | str | yes | — |
-| `reference_audio` | file | yes | — |
-| `reference_text` | str | yes | — (exact transcript, continuation cloning) |
+| `reference_audio` | file | yes\* | — |
+| `reference_text` | str | yes\* | — (exact transcript, continuation cloning) |
+| `speaker_id` | str | no | reuse a voice from `/v1/speakers/register` |
 | `num_steps` | int | no | `2` (MeanFlow native; also sizes the DiT KV cache) |
 | `guidance_scale` | float | no | `1.2` |
 | `seed` | int | no | artifact default |
@@ -118,6 +128,9 @@ check waits for the *engine*, not just the ASGI process).
 | `normalize_text` | bool | no | `false` |
 | `template_name` | str | no | `tts` |
 | `include_metrics` | bool | no | `false` → JSON envelope with base64 audio |
+
+\* `reference_audio` / `reference_text` become optional when `speaker_id`
+names a registered voice; `speaker_id` wins if both are supplied.
 
 Returns **`audio/wav`** plus metric headers:
 
@@ -135,12 +148,44 @@ curl -s -o out.wav -D - -X POST http://127.0.0.1:8000/v1/audio/speech \
   -F "reference_text=$(cat data/input/reference_clean.txt)"
 ```
 
+A CUDA out-of-memory is reported as **HTTP 503** with
+`{"error": "out_of_memory", "retryable": true}` rather than a generic 500, so
+a client can tell "retry smaller" apart from "this is broken".
+
+### Registering a voice once (`POST /v1/speakers/register`)
+
+`dots.tts` already caches prompt latents internally, so the cost that actually
+repeats is the client re-uploading a ~656 KB WAV with every chunk. Registering
+the voice once removes that:
+
+```bash
+# register once -> 201, returns an id
+curl -s -X POST http://127.0.0.1:8000/v1/speakers/register \
+  -F "reference_audio=@data/input/reference_clean.wav" \
+  -F "reference_text=$(cat data/input/reference_clean.txt)" \
+  -F "speaker_id=riccardo"
+
+# then every request carries ~20 bytes instead of 656 KB
+curl -s -o out.wav -X POST http://127.0.0.1:8000/v1/audio/speech \
+  -F "text=Questo non carica alcun audio." -F "speaker_id=riccardo"
+```
+
+| route | purpose |
+|---|---|
+| `POST /v1/speakers/register` | store a voice, returns its id |
+| `GET /v1/speakers` | list voices with a per-voice reuse counter |
+| `DELETE /v1/speakers/{id}` | forget a voice |
+| `POST /v1/admin/clear-cache` | drop prompt latents + empty the CUDA allocator |
+
+`scripts/process_txt.py` does this automatically, and falls back to per-chunk
+upload if the server is older or registration fails.
+
 Every route is also exercised programmatically by `scripts/test_api.py` and
 `scripts/benchmark_test.py` (which is the reference multipart client).
 
 ---
 
-## 4. Two spec numbers that are physically impossible on a 6 GB card
+## 4. Spec numbers that are physically impossible on a 6 GB card
 
 The v2 spec contains mutually exclusive requirements. They are documented here
 rather than silently ignored.
@@ -221,6 +266,21 @@ The most useful knobs:
 | `TTS_RTF_TARGET` | `0.5` | benchmark acceptance threshold (`gen/audio`) |
 | `TTS_CHUNK_MAX_WORDS` | `35` | fallback chunk size when `--max-words auto` cannot resolve |
 
+### Where each value comes from
+
+Every setting resolves in this order, and the first hit wins:
+
+1. **environment variable** — always, so you can override for a single run
+2. **`data/output/best_config.json`** — the profile `scripts/autotune.py`
+   measured on *this* host
+3. **built-in default** — the values verified on the 6 GB RTX 4050
+
+A missing, unreadable or wrongly-typed `best_config.json` is never fatal: the
+service falls back and logs a warning, because a tuning artefact should not be
+able to stop the service from starting. `GET /health` reports which tier is in
+force under `config_source`, so you can always tell whether a measured profile
+is actually being applied.
+
 ---
 
 ## 6. Finding the best settings for *your* GPU
@@ -234,21 +294,45 @@ python scripts/autotune.py --quick --apply    # fast, and install it
 python scripts/autotune.py --only reference   # cheapest dimension (~5 min)
 ```
 
+> **Note.** The sweep restarts the container many times (3–5 min per
+> server-side candidate, mostly `torch.compile` warmup), and now also downloads
+> `dots.tts-soar` (~2 GB) to measure it. Expect the full run to take well over
+> an hour, and expect `soar` to be ruled out on a 6 GB card.
+
 Everything is configurable: `--objective {balanced,throughput,headroom}`,
 `--profiles`, `--vram-limit-gb`, `--vram-margin-gb`, `--rtf-target`,
 `--only`, `--resume`. Artifacts land in `data/output/`:
 
 * `tuning_report.json` — every candidate, failures and reasons included.
+* `best_config.json` — the winner as the service reads it (typed values, host
+  description, constraints, and the model comparison). Consumed by
+  `app/config.py` at the next container start.
 * `tuned.env` — the winner as a pasteable block (`--apply` writes it into `.env`
   behind a timestamped backup).
 
-**What it sweeps.** The reference clip, then `TTS_MAX_GENERATE_LENGTH`,
-`TTS_MAX_SEQUENCE_LENGTH`, `TTS_NUM_STEPS`, `TTS_VOCODER_CHUNK_PATCHES`,
-`TTS_OPTIMIZE`, `TTS_LOW_VRAM_PATCHES`, `TTS_GUIDANCE_SCALE`. It uses staged
-coordinate descent (one dimension at a time, keeping the winner) rather than a
-full factorial, because each server-side candidate costs a restart plus a
-`torch.compile` warmup of 3–5 min. Candidates are persisted after every
-measurement, so `--resume` picks up where a crashed run stopped.
+**What it sweeps.** `TTS_MODEL_NAME` (`dots.tts-mf` vs `dots.tts-soar`) and
+`TTS_PRECISION` first — which checkpoint is feasible decides the envelope
+everything else is tuned inside — then the reference clip,
+`TTS_MAX_GENERATE_LENGTH`, `TTS_MAX_SEQUENCE_LENGTH`, `TTS_NUM_STEPS`,
+`TTS_VOCODER_CHUNK_PATCHES`, `TTS_OPTIMIZE`, `TTS_LOW_VRAM_PATCHES`,
+`TTS_GUIDANCE_SCALE`. It uses staged coordinate descent (one dimension at a
+time, keeping the winner) rather than a full factorial, because each
+server-side candidate costs a restart plus a `torch.compile` warmup of 3–5 min.
+Candidates are persisted after every measurement, so `--resume` picks up where a
+crashed run stopped.
+
+The **soar-vs-mf comparison table** keeps the checkpoints that were ruled out
+along with the reason, because "soar cannot run on this GPU" is the most
+useful single result of the sweep:
+
+```
+[tune] model comparison (v3 Task 4.3)
+  checkpoint                          feasible  best RTF    min peak
+  -------------------------------- ----------- --------- -----------
+  dots-studio/dots.tts-mf          1/1            0.4638     5381 MB   <- selected
+  dots-studio/dots.tts-soar        0/1                 -           -
+  ruled out: dots-studio/dots.tts-soar never fit in the 5.5 GB peak-VRAM budget
+```
 
 Two things it deliberately guards against:
 

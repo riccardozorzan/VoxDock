@@ -60,7 +60,7 @@ TTS/
 │   ├── clean_audio.py          # denoise + validate + --trim-to (335)
 │   ├── process_txt.py          # chunk → POST → FFmpeg concat (720)
 │   ├── benchmark_test.py       # cold start / VRAM / RTF benchmark (580)
-│   ├── tune_settings.py        # NEW: autotuner (1409)
+│   ├── autotune.py            # NEW: autotuner (was tune_settings.py)
 │   └── test_api.py             # one-shot smoke test (129)
 └── data/
     ├── references/             # raw voice recordings + transcripts
