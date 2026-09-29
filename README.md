@@ -119,6 +119,7 @@ re-downloaded.
 ├── pyproject.toml             # ruff config, so the linter is the same everywhere
 ├── pytest.ini
 ├── .github/workflows/ci.yml   # pytest + check_identity.py + ruff on every push
+├── LICENSE                    # non-commercial (CC BY-NC 4.0), see section 9
 ├── app/
 │   ├── config.py              # settings: env -> best_config.json -> defaults
 │   ├── patches.py             # low-VRAM patches for dots.tts (6 GB cards)
@@ -763,4 +764,14 @@ handle it downstream.
 | `volume "local_tts_hf_cache" was created for project "local-tts-docker"` | expected and harmless — the volume predates the rename and keeps the ~4.4 GB of weights |
 | first request after a restart is slow (RTF > 2) | expected: it pays any compile the warmup did not cover. The second request is representative |
 | `speechbrain is not installed` | it is in `requirements.txt`; rebuild the image |
+
+---
+
+## 9. License
+
+**Non-commercial use only.** Use, copy, modification and distribution are allowed
+for non-commercial purposes; commercial use needs prior written permission from
+the copyright holder. The authoritative terms are Creative Commons
+Attribution-NonCommercial 4.0 International (SPDX: `CC-BY-NC-4.0`) — the full
+text is in [`LICENSE`](LICENSE).
 
