@@ -540,6 +540,29 @@ Treat the +0.021 as indicative rather than precise: it is a single generation
 per configuration, and a difference this small is within the range where more
 samples would be needed to claim significance.
 
+#### Loudness normalisation, measured
+
+`process_txt.py` targets **−16 LUFS with a −1.5 dBTP ceiling**. Single-pass
+`loudnorm` guesses the loudness before analysing, so it normalised against an
+estimate; the two-pass version measures with `ebur128` first and applies the
+computed gain. Measured on real output:
+
+| | loudness error | true peak |
+|---|---:|---:|
+| single-pass `loudnorm` | −0.50 LU | −1.40 dBFS |
+| two-pass, limiter at the ceiling | −0.50 LU | **−0.80 dBFS — over** |
+| two-pass, limiter backed off 1 dB | −0.90 LU | **−1.80 dBFS — held** |
+
+The middle row is the trap: `alimiter` caps *sample* peak, not oversampled true
+peak, so setting it to −1.5 dB still let the true peak reach −0.8. The limit is
+therefore set 1 dB below the ceiling (`TRUE_PEAK_MARGIN_DB`).
+
+This material has a **~16 dB crest factor**, so −16 LUFS and −1.5 dBTP are close
+to mutually exclusive. The limiter costs ~0.4 LU of loudness accuracy to hold
+the ceiling, and `process_txt.py` says so on stderr rather than hiding it. If
+loudness accuracy matters more than the peak ceiling, pass `--no-normalize` and
+handle it downstream.
+
 ---
 
 ## 7. Operational notes

@@ -334,6 +334,18 @@ def test_silence_is_reported_as_unmeasurable():
     assert _parse_ebur128("") is None
 
 
+def test_the_limiter_is_backed_off_below_the_ceiling():
+    """`alimiter` caps sample peak, not oversampled true peak.
+
+    Asking it for the -1.5 dBTP ceiling directly still measured a true peak of
+    -0.8 dBFS on real output, so the limit is set a margin below the ceiling. If
+    this ever changes, the ceiling silently stops being enforced.
+    """
+    from scripts.process_txt import TRUE_PEAK_MARGIN_DB
+
+    assert TRUE_PEAK_MARGIN_DB > 0, "a zero margin lets true peak exceed the ceiling"
+
+
 def test_splitting_stops_at_max_depth(monkeypatch, tmp_path):
     """max_splits is a hard bound, not a suggestion."""
     import scripts.process_txt as process_txt

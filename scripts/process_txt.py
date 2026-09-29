@@ -597,7 +597,8 @@ def normalize_loudness(
             file=sys.stderr,
         )
         filter_chain = (
-            f"volume={offset:.2f}dB,alimiter=limit={tp}dB:level=disabled"
+            f"volume={offset:.2f}dB,"
+            f"alimiter=limit={tp - TRUE_PEAK_MARGIN_DB:.2f}dB:level=disabled"
         )
     else:
         filter_chain = f"volume={offset:.2f}dB"
@@ -634,6 +635,18 @@ def _linear_offset_db(
     instead of trading it away for the peak.
     """
     return target_lufs - measured["input_i"]
+
+
+#: EBU R128 integrated-loudness target and true-peak ceiling for the stitch.
+DEFAULT_LUFS = -16.0
+DEFAULT_TRUE_PEAK = -1.5
+
+#: `alimiter` limits *sample* peak, not oversampled true peak. Inter-sample
+#: overshoot on this material runs ~1 dB above the sample peak, so asking the
+#: limiter for the ceiling directly still produced a true peak of -0.8 dBFS
+#: (measured). Backing the limit off by this margin is what actually holds the
+#: ceiling: at -2.5 dB the same file measures a true peak of -1.80 dBFS.
+TRUE_PEAK_MARGIN_DB = 1.0
 
 
 def _parse_ebur128(stderr: str) -> Optional[dict[str, float]]:
