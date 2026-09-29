@@ -40,3 +40,6 @@ __pycache__/
 venv/
 .pytest_cache/
 
+
+# Long soak-test input (1,400 words of filler), regenerable with a one-liner.
+data/input/soak.txt

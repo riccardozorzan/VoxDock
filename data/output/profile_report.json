@@ -1,0 +1,45 @@
+{
+  "timestamp": "2026-09-29T09:13:03+00:00",
+  "reference": "/app/data/input/reference_clean.wav",
+  "text": "Il sole tramonta lentamente dietro le colline mentre la campana del paese suona lontano.",
+  "num_steps": 2,
+  "total_self_cuda_ms": 3473.303,
+  "by_phase": {
+    "other": {
+      "self_cuda_ms": 1374.538,
+      "share_percent": 39.6,
+      "op_count": 269
+    },
+    "linear layers (LLM + DiT)": {
+      "self_cuda_ms": 1216.659,
+      "share_percent": 35.0,
+      "op_count": 29
+    },
+    "vocoder (BigVGAN conv)": {
+      "self_cuda_ms": 461.688,
+      "share_percent": 13.3,
+      "op_count": 15
+    },
+    "GPU idle (host launch gap)": {
+      "self_cuda_ms": 224.048,
+      "share_percent": 6.5,
+      "op_count": 1
+    },
+    "attention (LLM + DiT)": {
+      "self_cuda_ms": 183.585,
+      "share_percent": 5.3,
+      "op_count": 24
+    },
+    "normalisation": {
+      "self_cuda_ms": 11.64,
+      "share_percent": 0.3,
+      "op_count": 118
+    },
+    "host<->device transfer": {
+      "self_cuda_ms": 1.145,
+      "share_percent": 0.0,
+      "op_count": 5
+    }
+  },
+  "note": "Self CUDA time only, so overlapping work is not double counted. The fitted model puts the per-request fixed cost at ~0.79 s; this says which phase that time belongs to."
+}

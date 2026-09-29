@@ -402,6 +402,41 @@ per-request fixed cost is independent of the reference length (measured across
 bounded by it. For short text either accept a higher RTF or batch sentences into
 one request; `process_txt.py` already batches by default.
 
+#### Where the fixed cost actually goes
+
+`scripts/profile_request.py` profiles one request with `torch.profiler` and
+attributes the CUDA time by op kind (short text, 2 steps, 7 s reference):
+
+| phase | self CUDA time | share |
+|---|---:|---:|
+| other (elementwise, reductions, unclassified) | 1374.5 ms | 39.6% |
+| linear layers (LLM + DiT) | 1216.7 ms | 35.0% |
+| vocoder — BigVGAN convolution | 461.7 ms | 13.3% |
+| **GPU idle (host launch gap)** | **224.1 ms** | **6.5%** |
+| attention (LLM + DiT) | 183.6 ms | 5.3% |
+| normalisation | 11.6 ms | 0.3% |
+| host↔device transfer | 1.1 ms | 0.0% |
+
+The 6.5% `Command Buffer Full` row is the interesting one: time when the GPU
+had nothing queued and was waiting on the host to launch work. That suggests
+the fixed cost is partly **host-bound**, not GPU-bound — so raising
+`OMP_NUM_THREADS`, or re-enabling CUDA graphs, would attack it where lowering
+`num_steps` or shortening the reference would not.
+
+Treat it as a lead rather than a conclusion: it is only 6.5%, and the bulk is
+real compute spread across many small elementwise ops. Run the script for the
+full operator table rather than trusting the summary above.
+
+```bash
+docker compose stop tts
+docker compose run --rm --entrypoint python tts \
+    scripts/profile_request.py --report data/output/profile_report.json
+docker compose up -d
+```
+
+The service must be stopped first: the script loads its own copy of the
+checkpoint, and two copies of a 4.5 GiB model do not fit in 6 GB.
+
 The tuned configuration (`best_config.json`, from `autotune.py --quick`) raises
 `TTS_VOCODER_CHUNK_PATCHES` from 12 to 32, which improved the long-form pipeline
 from RTF 0.690 to 0.469 with no change in peak VRAM (5451.9 MB).
