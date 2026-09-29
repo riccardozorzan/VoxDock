@@ -135,8 +135,10 @@ re-downloaded.
 │   ├── profile_request.py     # attribute the per-request fixed cost
 │   ├── latency_report.py      # cold start / first request / steady state
 │   ├── check_identity.py      # assert compose matches app/__init__.py
-│   └── test_api.py            # smoke test; --assert for CI
-├── tests/                     # 126 host-side tests, no GPU needed (~0.1 s)
+│   ├── test_api.py            # smoke test; --assert for CI
+│   ├── make_reference_set.py  # write the autotuner's reference_set.json
+│   └── fetch_dev_audio.py     # fetch the public ECAPA control clips
+├── tests/                     # 139 host-side tests, no GPU needed (~0.1 s)
 │   ├── conftest.py            # fixtures: isolated env, reloadable config
 │   ├── test_config.py         # the three-tier settings chain
 │   ├── test_speakers.py       # registry CRUD + path-traversal defence
@@ -146,6 +148,7 @@ re-downloaded.
 │   ├── test_api_smoke.py      # the --assert smoke test
 │   ├── test_ui.py             # /ui asset: endpoints, DOM ids, escaping
 │   ├── test_compose_env.py    # every TTS_* the app reads reaches the container
+│   ├── test_make_reference_set.py # the sweep manifest the autotuner accepts
 │   └── test_identity.py       # compose vs app/Dockerfile identity drift guard
 └── data/
     ├── references/            # raw reference .wav + transcript .txt
@@ -667,6 +670,20 @@ handle it downstream.
 * **`benchmark_test.py`** reports the RTF in both conventions
   (`generation/audio` for the `< 0.5` target and `audio/generation` for the spec's
   literal formula) and exits non-zero when a threshold is violated.
+* **A fresh clone has no audio at all, and that is deliberate** — `data/**/*.wav`
+  is ignored because a voice is personal. Three consequences worth knowing:
+  * the *impostor control* is public benchmark audio, one command away:
+    `python scripts/fetch_dev_audio.py` fetches the two example clips that ship
+    with the ECAPA model (VoxCeleb id10003/id10004, ~140 KB together). Without
+    one, `speaker_similarity.py` reports a number with no scale;
+  * your *reference voice* cannot be fetched by anything, including a script —
+    record 5–15 s of yourself and run `clean_audio.py`;
+  * the autotuner's three-reference sweep needs a `reference_set.json` pointing at
+    *your* clips. The committed manifest points at files that are not in the
+    repository, so the autotuner falls back to a single clip and says so.
+    `scripts/make_reference_set.py` writes a valid manifest from
+    `--ref NAME LABEL AUDIO TEXT` pairs, validating durations and the patch budget
+    instead of leaving you to hand-edit JSON.
 * **The tree stays clean while you run things.** Host runs only litter because
   Python writes `__pycache__` next to the source and ruff writes `.ruff_cache`.
   `export PYTHONPYCACHEPREFIX=/tmp/voxdock-pyc` moves the bytecode cache out of
