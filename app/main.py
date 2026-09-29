@@ -153,6 +153,11 @@ async def lifespan(app: FastAPI):
     app.state.last_generation = None
     app.state.lifetime_peak_vram_mb = None
     app.state.request_count = 0
+    # Queue telemetry: one 6 GB GPU runs one generation at a time, so "is it busy
+    # or is it backed up?" is an operational question with no visible answer until
+    # a client times out. See _generation_slot().
+    app.state.pending_requests = 0
+    app.state.in_flight = 0
     app.state.speakers = SpeakerRegistry(settings.paths.speakers_dir)
     logger.info(
         "Registered speakers on disk: %d",
@@ -375,6 +380,14 @@ async def health(request: Request) -> JSONResponse:
         "timestamp": now_iso(),
         "uptime_seconds": round(time.time() - state.started_at, 3),
         "request_count": state.request_count,
+        # Queue telemetry: `pending` counts every request that has reached the
+        # synthesis path, `in_flight` the one holding the GPU, so
+        # `waiting = pending - in_flight` is the actual backlog.
+        "queue": {
+            "pending": state.pending_requests,
+            "in_flight": state.in_flight,
+            "waiting": max(0, state.pending_requests - state.in_flight),
+        },
         "device": settings.model.device,
         "model": model,
         # Which resolution tier produced each setting (v3 Task 3.1). Makes it
@@ -417,6 +430,30 @@ async def list_models(request: Request) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 #  Speaker registry (v3 Task 3.3)
 # --------------------------------------------------------------------------- #
+@asynccontextmanager
+async def _generation_slot(state: Any):
+    """Count this request for ``/health`` while it holds - or waits for - the GPU.
+
+    One 6 GB GPU cannot run two generations at once, so the lock is what makes the
+    service correct; it is also the only thing a client can experience as "the
+    server is stuck". ``pending`` is incremented on entry and decremented in a
+    ``finally``, so a request that fails while waiting cannot leak a count.
+
+    Used as ``async with _generation_slot(state):`` in place of
+    ``async with state.generation_lock:``, so the route body keeps its shape.
+    """
+    state.pending_requests += 1
+    try:
+        async with state.generation_lock:
+            state.in_flight += 1
+            try:
+                yield
+            finally:
+                state.in_flight -= 1
+    finally:
+        state.pending_requests -= 1
+
+
 def _registry(request: Request) -> SpeakerRegistry:
     return request.app.state.speakers
 
@@ -547,6 +584,11 @@ async def create_speech(
 
     cleaned_text = (text or "").strip()
     if not cleaned_text:
+        # Defence in depth: FastAPI's form validation rejects an empty or
+        # whitespace-only `text` before the route body runs, so a client sending
+        # `text=` actually gets 422 {"type": "missing"} from the framework. This
+        # branch catches anything that gets past it, and the 422 is what the
+        # documented contract promises.
         raise HTTPException(status_code=400, detail="'text' must not be empty.")
 
     state = request.app.state
@@ -632,7 +674,7 @@ async def create_speech(
                 yield staged
 
     with _prompt_source() as prompt_path:
-        async with state.generation_lock:
+        async with _generation_slot(state):
             try:
                 outcome = await asyncio.to_thread(
                     _generate_sync,

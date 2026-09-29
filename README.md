@@ -172,6 +172,7 @@ check waits for the *engine*, not just the ASGI process).
 {
   "status": "ok",
   "ready": true,
+  "queue": { "pending": 0, "in_flight": 0, "waiting": 0 },
   "model": {
     "id": "dots-studio/dots.tts-mf",
     "precision": "bfloat16",
@@ -235,6 +236,12 @@ curl -s -o out.wav -D - -X POST http://127.0.0.1:8000/v1/audio/speech \
 A CUDA out-of-memory is reported as **HTTP 503** with
 `{"error": "out_of_memory", "retryable": true}` rather than a generic 500, so
 a client can tell "retry smaller" apart from "this is broken".
+
+A missing, empty or whitespace-only `text` is rejected by FastAPI's form
+validation before the route body runs, so it arrives as **422**
+(`{"type": "missing", "loc": ["body", "text"]}`) rather than the 400 the handler
+would raise itself. Either way it is a 4xx with a readable body; the route keeps
+a 400 branch as defence in depth.
 
 ### Registering a voice once (`POST /v1/speakers/register`)
 
@@ -695,6 +702,18 @@ handle it downstream.
     `scripts/make_reference_set.py` writes a valid manifest from
     `--ref NAME LABEL AUDIO TEXT` pairs, validating durations and the patch budget
     instead of leaving you to hand-edit JSON.
+* **Back up the only thing you cannot get back.** Everything under `data/` is
+  regenerable *except* the original recording in `data/references/*.wav` — the
+  clean copy, the registered speakers, the generated clips and the 85 MB ECAPA
+  cache can all be rebuilt, but nobody can re-record your voice. One line covers
+  everything worth keeping:
+
+  ```bash
+  tar czf ~/voxdock-voice-$(date +%Y%m%d).tar.gz data/references .env
+  ```
+
+  Restore with `tar xzf <file>` from the project root; `.env` is in there because
+  it holds your tuned values and any `HF_TOKEN`.
 * **The tree stays clean while you run things.** Host runs only litter because
   Python writes `__pycache__` next to the source and ruff writes `.ruff_cache`.
   `export PYTHONPYCACHEPREFIX=/tmp/voxdock-pyc` moves the bytecode cache out of

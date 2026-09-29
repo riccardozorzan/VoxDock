@@ -154,7 +154,13 @@ async function pollHealth() {
 
 function renderHealth() {
   const d = health;
-  setState(d.ready ? "ready" : (d.status || "loading"), d.ready ? "ok" : "warn");
+  // One GPU, one generation at a time: a server that is working is not a server
+  // that is unhealthy, and the difference is worth seeing at a glance.
+  const busy = !!(d.queue && d.queue.in_flight > 0);
+  setState(
+    busy ? "busy" : (d.ready ? "ready" : (d.status || "loading")),
+    busy ? "warn" : (d.ready ? "ok" : "warn")
+  );
 
   const alloc = (d.gpu && d.gpu.vram_allocated_mb) || 0;
   const total = (d.gpu && d.gpu.vram_total_mb) || 1;
@@ -178,6 +184,8 @@ function renderHealth() {
     ["steps", d.model ? d.model.default_num_steps : "—"],
     ["uptime", d.uptime_seconds != null ? Math.round(d.uptime_seconds) + " s" : "—"],
     ["requests", d.request_count],
+    ["in flight", d.queue ? d.queue.in_flight : "—"],
+    ["waiting", d.queue ? d.queue.waiting : "—"],
     ["lifetime peak", d.lifetime_peak_vram_mb
       ? (d.lifetime_peak_vram_mb / 1024).toFixed(2) + " GB" : "—"],
   ];
