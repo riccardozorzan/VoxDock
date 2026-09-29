@@ -286,6 +286,54 @@ def test_a_500_is_never_split(monkeypatch, tmp_path):
     assert calls["n"] == 1, "a 500 must not trigger a split retry"
 
 
+def test_peak_ceiling_does_not_reduce_the_gain():
+    """The gain is never capped to fit the peak - a limiter handles that instead.
+
+    Capping the gain here would silently give up over a dB of loudness on
+    speech, whose crest factor is far too high for -16 LUFS and -1.5 dBTP to
+    coexist.
+    """
+    from scripts.process_txt import _linear_offset_db
+
+    measured = {"input_i": -29.10, "input_tp": -13.40}
+    # Only 11.9 dB of headroom remains, but the required gain is 13.1 dB.
+    assert _linear_offset_db(
+        target_lufs=-16.0, measured=measured, tp_ceiling=-1.5
+    ) > (-1.5 - (-13.40))
+
+
+def test_measured_loudness_comes_from_the_summary_block():
+    """Only the final ``Summary:`` counts, and the last Peak is the true peak."""
+    from scripts.process_txt import _parse_ebur128
+
+    stderr = """
+[Parsed_ebur128 @ 0x1] t: 1.0  M: -20.0  S: 100.0
+  I:  -20.5 LUFS    LRA: 5.2 LU
+  Peak:  -6.10 dBFS
+Summary:
+
+  Integrated loudness:
+    I:         -18.20 LUFS
+    Threshold: -28.90 LUFS
+
+  True peak:
+    Peak:       -1.42 dBFS
+"""
+    parsed = _parse_ebur128(stderr)
+
+    assert parsed == {"input_i": -18.20, "input_tp": -1.42}
+
+
+def test_silence_is_reported_as_unmeasurable():
+    """``-inf`` has no loudness to target, so it must not become a gain."""
+    from scripts.process_txt import _parse_ebur128
+
+    silence = "Summary:\n  I:  -inf LUFS\n  True peak:\n    Peak: -inf dBFS\n"
+    assert _parse_ebur128(silence) is None
+    assert _parse_ebur128("no summary at all") is None
+    assert _parse_ebur128("") is None
+
+
 def test_splitting_stops_at_max_depth(monkeypatch, tmp_path):
     """max_splits is a hard bound, not a suggestion."""
     import scripts.process_txt as process_txt

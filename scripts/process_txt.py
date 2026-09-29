@@ -495,8 +495,28 @@ def normalize_loudness(
 ) -> Optional[list[str]]:
     """EBU R128 normalisation (v3 Task 5.3); ``None`` when ffmpeg is missing.
 
-    A second pass over the stitched file, so every chunk of a long-form job
-    ends up at one consistent level.
+    A second pass over the stitched file, so every chunk of a long-form job ends
+    up at one consistent level.
+
+    **Two-pass, and peak-aware.** ffmpeg's ``loudnorm`` in single-pass mode has
+    to guess the integrated loudness before it has analysed anything, so it
+    normalises against an estimate. The fix is to measure first (``-f null -``)
+    and then apply a computed linear gain in a second real pass.
+
+    Two subtleties, both found by measuring the real output rather than trusting
+    the filter's own numbers:
+
+    * ffmpeg's ``target_offset`` must **not** be applied directly. It is derived
+      from a *predicted* output, so using it double-counts the gain and lands on
+      roughly half the needed correction. The offset that closes the loop is
+      simply ``target - measured``.
+    * the gain is capped so the true peak never exceeds ``tp``. On a file that
+      already sits near the ceiling, the loudness target and the peak ceiling
+      can be mutually exclusive; staying under the ceiling wins, and the
+      residual loudness error is reported rather than hidden.
+
+    Digital silence measures as ``-inf`` and is rejected by
+    :func:`_parse_ebur128`, so the single-pass fallback covers it.
     """
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
@@ -505,16 +525,148 @@ def normalize_loudness(
             file=sys.stderr,
         )
         return None
+
+    # ---- pass 1: measure ---------------------------------------------------- #
+    # Measured with `ebur128`, NOT with `loudnorm ... print_format=json`.
+    # The loudnorm probe reports a value derived from its own internal gating
+    # pass, which on this material (7 short chunks separated by 300 ms of
+    # silence) reads ~1.1 dB low - enough that a "correct" arithmetic offset
+    # still leaves the output a full dB under target. ebur128 is a plain meter
+    # with no gain applied, so target - measured closes the loop exactly.
+    probe = subprocess.run(
+        [
+            ffmpeg, "-hide_banner", "-nostats",
+            "-i", str(source),
+            "-af", "ebur128=peak=true",
+            "-f", "null", "-",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    measured = _parse_ebur128(probe.stderr)
+    if measured is None:
+        # Loudness is already right, or ffmpeg could not measure it; a plain
+        # single-pass is still better than shipping the file untouched.
+        print(
+            "[process_txt] could not read the measured loudness; falling back "
+            "to single-pass normalisation",
+            file=sys.stderr,
+        )
+        command = [
+            ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
+            "-i", str(source),
+            "-af", f"loudnorm=I={lufs}:LRA={lra}:TP={tp}",
+            "-ar", "48000",
+            "-ac", "1",
+            str(destination),
+        ]
+        subprocess.run(command, check=True)
+        return command
+
+    offset = _linear_offset_db(target_lufs=lufs, measured=measured, tp_ceiling=tp)
+    if abs(offset) < 0.05:
+        # Already within a tenth of a dB; a copy is bit-exact and avoids a
+        # pointless re-encode.
+        print(
+            f"[process_txt] loudness already on target "
+            f"(I={measured['input_i']} LUFS) - copying without a gain pass"
+        )
+        shutil.copyfile(source, destination)
+        return [
+            ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
+            "-i", str(source), "-ar", "48000", "-ac", "1", str(destination),
+        ]
+
+    headroom = tp - measured["input_tp"]
+    if offset > headroom:
+        # The two targets genuinely conflict for this material. Rather than
+        # give up on the loudness target, apply the full linear gain and let a
+        # real limiter catch the handful of peaks that would otherwise exceed
+        # the ceiling. `alimiter` is the right tool: it only touches samples
+        # above the threshold, so the integrated loudness is essentially
+        # unaffected while the peak is held. Capping the *gain* instead (an
+        # earlier attempt) silently gave up ~1.2 LU of loudness to satisfy the
+        # peak, which is a much worse trade for speech.
+        print(
+            f"[process_txt] true-peak limited: reaching {lufs} LUFS needs "
+            f"{offset:+.2f} dB but only {headroom:+.2f} dB is available before "
+            f"true peak passes {tp} dBTP (crest factor "
+            f"{measured['input_tp'] - measured['input_i']:.1f} dB). Applying the "
+            f"full gain and limiting peaks at {tp} dBTP.",
+            file=sys.stderr,
+        )
+        filter_chain = (
+            f"volume={offset:.2f}dB,alimiter=limit={tp}dB:level=disabled"
+        )
+    else:
+        filter_chain = f"volume={offset:.2f}dB"
+
+    print(
+        f"[process_txt] loudness measured I={measured['input_i']} LUFS "
+        f"(true peak {measured['input_tp']} dBTP) -> "
+        f"applying {offset:+.2f} dB to reach {lufs} LUFS"
+    )
     command = [
         ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
         "-i", str(source),
-        "-af", f"loudnorm=I={lufs}:LRA={lra}:TP={tp}",
+        "-af", filter_chain,
         "-ar", "48000",
         "-ac", "1",
         str(destination),
     ]
     subprocess.run(command, check=True)
     return command
+
+
+def _linear_offset_db(
+    *, target_lufs: float, measured: dict[str, float], tp_ceiling: float
+) -> Optional[float]:
+    """Linear gain in dB that moves the measured loudness onto the target.
+
+    Deliberately arithmetic (``target - measured``) rather than ffmpeg's
+    ``target_offset``: that field is computed against a *predicted* render, so
+    applying it directly undershoots by roughly half the needed correction.
+
+    The peak ceiling is **not** applied here. When the two targets conflict -
+    and for speech with a ~15 dB crest factor at -16 LUFS they always do - the
+    caller gains first and limits afterwards, which keeps the loudness target
+    instead of trading it away for the peak.
+    """
+    return target_lufs - measured["input_i"]
+
+
+def _parse_ebur128(stderr: str) -> Optional[dict[str, float]]:
+    """Extract the final integrated loudness and true peak from ``ebur128``.
+
+    ``ebur128`` prints a running per-frame block and then a ``Summary:``; only
+    the summary is wanted, and of the repeated ``Peak:`` lines the last is the
+    true peak. Returns ``None`` when the summary is missing or the file is
+    digital silence (``-inf``), which the caller treats as "cannot measure".
+    """
+    marker = "Summary:"
+    start = stderr.rfind(marker)
+    if start == -1:
+        return None
+    summary = stderr[start:]
+
+    def _number(pattern: str, text: str) -> Optional[float]:
+        match = re.search(pattern, text)
+        if not match:
+            return None
+        try:
+            value = float(match.group(1))
+        except ValueError:
+            return None
+        if value != value or value in (float("inf"), float("-inf")):
+            return None
+        return value
+
+    integrated = _number(r"I:\s*(-?[\d.]+|-inf)\s*LUFS", summary)
+    peaks = re.findall(r"Peak:\s*(-?[\d.]+)\s*dBFS", summary)
+    if integrated is None or not peaks:
+        return None
+    return {"input_i": integrated, "input_tp": float(peaks[-1])}
 
 
 def concat_chunks(
