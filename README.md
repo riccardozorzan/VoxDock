@@ -562,33 +562,44 @@ absolute threshold would be meaningless.
 #### What 2 sampling steps actually costs
 
 `TTS_NUM_STEPS=2` was chosen for memory reasons alone — the DiT KV cache is
-sized by step count — so it is worth knowing what it trades. Both rows below
-are the same text, same reference and the same 128-patch budget; only the step
-count differs:
+sized by step count — so it is worth knowing what it trades. This table is **one
+run, three samples per configuration**, all six requests in the same warm
+process: the step count travels as the per-request form field, so nothing had to
+restart. Same text, same 7 s reference, same seed, same 128-patch budget; the
+per-run numbers are in `data/output/steps_ab.json`.
 
-| `TTS_NUM_STEPS` | similarity | long-form RTF | peak VRAM |
+| `TTS_NUM_STEPS` | similarity (n=3) | engine RTF | peak VRAM |
 |---|---:|---:|---:|
-| 2 (tuned default) | 0.7645 | **0.469** | **5458 MB** |
-| 4 | **0.7859** | 0.550 | 5518 MB |
+| 2 (tuned default) | 0.7446 (0.707–0.766) | **0.487** | **5457 MB** |
+| 4 | 0.7599 (0.743–0.774) | 0.553 | 5518 MB |
 | — real same-speaker recording | 0.7146 | — | — |
 
-So doubling the steps buys **+0.021 cosine** for **+17 % generation time** and
-**+60 MB of VRAM**. Four steps does still fit at `max_generate_length=128` —
-the tuned `vocoder_chunk_patches=32` freed enough headroom that the KV cache
-doubles without an OOM, which the earlier notes assumed would not happen.
+Four steps costs **+13.7 % engine time** and **+60 MB of VRAM**, and it still fits:
+the tuned `vocoder_chunk_patches=32` freed enough headroom for the KV cache to
+double without an OOM, which the earlier notes here assumed would not happen.
 
-Both configurations clear the real same-speaker recording, so the tuned default
-is not a quality compromise worth reversing. If voice fidelity matters more
-than throughput for a particular job, `TTS_NUM_STEPS=4` is now a viable choice
-on this card:
+**The similarity gain is not established.** The +0.0153 difference between the
+means is *smaller than the spread inside either configuration* (0.707–0.766 at
+two steps, 0.743–0.774 at four) and the two ranges overlap, so three samples
+cannot separate them. An earlier revision of this section claimed **+0.021** from
+a single generation per configuration; that was noise with a decimal point, and
+the three-sample run says so. Treat four steps as plausible-but-unproven rather
+than as a quality upgrade.
 
 ```bash
 TTS_NUM_STEPS=4 docker compose up -d --force-recreate
 ```
 
-Treat the +0.021 as indicative rather than precise: it is a single generation
-per configuration, and a difference this small is within the range where more
-samples would be needed to claim significance.
+Two caveats on the numbers themselves, both recorded in `steps_ab.json`:
+`X-Peak-Vram-MB` is the **process lifetime** peak, so a configuration's three runs
+report one number rather than three; and the first request after an idle container
+ran at RTF 2.07 here, which is why the 2-step RTF averages runs 2–3 only.
+
+Finally, two VRAM figures elsewhere in this document are not in conflict: the
+autotuner's **5578 MB** was measured with the 11.45 s `ref_l` prompt (72 patches)
+while the table above uses the 7 s reference (44 patches). The prompt prefill
+scales with reference length, so those are two different requests — not two
+different builds.
 
 #### Loudness normalisation, measured
 

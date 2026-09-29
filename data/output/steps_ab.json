@@ -1,0 +1,132 @@
+{
+  "generated": "2026-09-29T12:55:42+00:00",
+  "generated_by": "scripts/benchmark_test.py + scripts/speaker_similarity.py, 3 runs per configuration",
+  "question": "What does going from TTS_NUM_STEPS=2 to 4 actually cost, measured in one run?",
+  "method": {
+    "text": "identical two-sentence text for all six runs",
+    "reference": "data/input/reference_clean.wav (7.0 s, 44 patches)",
+    "scored_against": "data/references/my_voice_v2.wav (14.9 s real same-speaker take)",
+    "impostor_control": -0.005,
+    "num_steps": "sent as the per-request form field, so both configurations ran in the same warm process - no restart, no load-time reallocation",
+    "seed": 42,
+    "excluded_from_steady_state": "steps2_run1: first request after an idle container (rtf 2.07), a shape warm-up rather than the steady state",
+    "peak_vram_is_one_measurement_per_config": "X-Peak-Vram-MB is the process lifetime peak, so the three runs of a configuration report the same number - it is not three samples"
+  },
+  "summary": {
+    "2": {
+      "engine_rtf_steady": {
+        "n": 2,
+        "mean": 0.4865,
+        "min": 0.4839,
+        "max": 0.4891
+      },
+      "similarity_all_runs": {
+        "n": 3,
+        "mean": 0.7446,
+        "min": 0.7069,
+        "max": 0.7662
+      },
+      "peak_vram_mb_lifetime": {
+        "n": 3,
+        "mean": 5457.3,
+        "min": 5457.3,
+        "max": 5457.3
+      }
+    },
+    "4": {
+      "engine_rtf_steady": {
+        "n": 3,
+        "mean": 0.553,
+        "min": 0.5485,
+        "max": 0.5585
+      },
+      "similarity_all_runs": {
+        "n": 3,
+        "mean": 0.7599,
+        "min": 0.7428,
+        "max": 0.7738
+      },
+      "peak_vram_mb_lifetime": {
+        "n": 3,
+        "mean": 5517.8,
+        "min": 5517.8,
+        "max": 5517.8
+      }
+    }
+  },
+  "delta_4_minus_2": {
+    "engine_rtf_pct": 13.7,
+    "similarity_mean": 0.0153,
+    "peak_vram_mb": 60.5,
+    "verdict": "time and memory are solid; the similarity gain is NOT established",
+    "why": "the mean difference (+0.0153) is smaller than the within-configuration spread (2 steps 0.7069-0.7662, 4 steps 0.7428-0.7738), and the two ranges overlap. Three samples per configuration cannot separate them."
+  },
+  "runs": [
+    {
+      "num_steps": 2,
+      "run": 1,
+      "steady_state": false,
+      "audio_seconds": 6.88,
+      "generation_seconds": 14.213,
+      "engine_rtf": 0.563,
+      "rtf": 2.0659,
+      "peak_vram_mb": 5457.3,
+      "similarity": 0.7069
+    },
+    {
+      "num_steps": 2,
+      "run": 2,
+      "steady_state": true,
+      "audio_seconds": 7.36,
+      "generation_seconds": 3.565,
+      "engine_rtf": 0.4839,
+      "rtf": 0.4843,
+      "peak_vram_mb": 5457.3,
+      "similarity": 0.7662
+    },
+    {
+      "num_steps": 2,
+      "run": 3,
+      "steady_state": true,
+      "audio_seconds": 7.36,
+      "generation_seconds": 3.604,
+      "engine_rtf": 0.4891,
+      "rtf": 0.4897,
+      "peak_vram_mb": 5457.3,
+      "similarity": 0.7607
+    },
+    {
+      "num_steps": 4,
+      "run": 1,
+      "steady_state": true,
+      "audio_seconds": 6.88,
+      "generation_seconds": 3.846,
+      "engine_rtf": 0.5585,
+      "rtf": 0.559,
+      "peak_vram_mb": 5517.8,
+      "similarity": 0.7738
+    },
+    {
+      "num_steps": 4,
+      "run": 2,
+      "steady_state": true,
+      "audio_seconds": 6.88,
+      "generation_seconds": 3.802,
+      "engine_rtf": 0.5519,
+      "rtf": 0.5526,
+      "peak_vram_mb": 5517.8,
+      "similarity": 0.7428
+    },
+    {
+      "num_steps": 4,
+      "run": 3,
+      "steady_state": true,
+      "audio_seconds": 6.56,
+      "generation_seconds": 3.601,
+      "engine_rtf": 0.5485,
+      "rtf": 0.5489,
+      "peak_vram_mb": 5517.8,
+      "similarity": 0.763
+    }
+  ]
+}
