@@ -68,6 +68,7 @@ def _seed_everything(seed: int) -> None:
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(int(seed))
 
+
 def load_runtime() -> dict[str, Any]:
     """Blocking model load executed in a worker thread during startup."""
     from dots_tts.runtime import DotsTtsRuntime
@@ -225,9 +226,6 @@ def _model_payload(request: Request) -> dict[str, Any]:
         payload["error"] = request.app.state.model_error
     return payload
 
-def _vram_usage_mb() -> Optional[float]:
-    snapshot = gpu_snapshot()
-    return snapshot.get("vram_allocated_mb")
 
 # --------------------------------------------------------------------------- #
 #  Synthesis worker (blocking -> executed in a thread pool)

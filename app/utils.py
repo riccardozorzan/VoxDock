@@ -15,9 +15,8 @@ import wave
 from datetime import datetime, timezone
 from typing import Any, Iterator, Optional
 
-from app.config import settings
-
 from app import LOG_NAMESPACE
+from app.config import settings
 
 logger = logging.getLogger(f"{LOG_NAMESPACE}.utils")
 
@@ -25,7 +24,6 @@ __all__ = [
     "now_iso",
     "bytes_to_mb",
     "resolve_precision",
-    "torch_available",
     "gpu_snapshot",
     "reset_cuda_peak_stats",
     "clear_cuda_cache",
@@ -37,7 +35,6 @@ __all__ = [
     "wav_duration_seconds",
     "temp_file_path",
     "safe_filename",
-    "format_duration",
 ]
 
 _BYTES_PER_MB = 1024 * 1024
@@ -58,25 +55,11 @@ def bytes_to_mb(value: Optional[int]) -> Optional[float]:
     return round(int(value) / _BYTES_PER_MB, 2)
 
 
-def format_duration(seconds: float) -> str:
-    seconds = max(0.0, float(seconds))
-    minutes, whole = divmod(int(seconds), 60)
-    return f"{minutes:d}m{whole:02d}s" if minutes else f"{whole:d}s"
-
-
 def safe_filename(name: str) -> str:
     """Strip any directory component / odd characters from a client filename."""
     base = os.path.basename(name or "reference.wav")
     cleaned = "".join(ch if ch.isalnum() or ch in "-_. " else "_" for ch in base)
     return cleaned.strip() or "reference.wav"
-
-
-def torch_available() -> bool:
-    try:
-        import torch  # noqa: F401
-    except Exception:  # pragma: no cover - defensive
-        return False
-    return True
 
 
 # --------------------------------------------------------------------------- #
@@ -250,7 +233,6 @@ def is_out_of_memory(exc: BaseException) -> bool:
     return False
 
 
-
 # --------------------------------------------------------------------------- #
 #  Audio conversion helpers
 # --------------------------------------------------------------------------- #
@@ -310,7 +292,6 @@ def write_wav(
         subtype=subtype,
         **kwargs,
     )
-
 
 
 def wav_duration_seconds(path: str | os.PathLike[str]) -> float:

@@ -116,7 +116,6 @@ def assert_patches_applied(
         )
 
 
-
 # --------------------------------------------------------------------------- #
 #  1. Chunked, in-place AdaLN fusion
 # --------------------------------------------------------------------------- #
@@ -349,6 +348,3 @@ def apply_patches(chunk_patches: int = VOCODER_CHUNK_PATCHES) -> dict[str, bool]
     _APPLIED = True
     logger.info("Low-VRAM patches applied: %s", result)
     return result
-
-
-

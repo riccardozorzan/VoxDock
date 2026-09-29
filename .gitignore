@@ -1,8 +1,9 @@
 # Local configuration. `.env` holds this machine's settings (and a slot for
 # HF_TOKEN); `.env.example` is the committed template. `autotune.py --apply`
-# writes timestamped backups named `<name>.env.bak-<stamp>`, hence both patterns.
+# writes timestamped backups as `<name>.env.bak-<stamp>` - for `.env` itself the
+# doubled extension (`.env.env.bak-...`, because `Path(".env").suffix` is empty)
+# is expected, hence the single glob below.
 .env
-.env.bak-*
 *.env.bak-*
 
 # Voice recordings and derived audio: large, and personal. The transcripts
@@ -26,8 +27,6 @@ data/.speechbrain/
 # they are the evidence behind every number claimed in the docs
 # (benchmark_report.json, tuning_report.json, best_config.json).
 data/output/*.wav
-data/output/*.raw.wav
-data/output/*_raw.wav
 # Per-candidate benchmark dumps written by autotune.py for crash-resume. The
 # consolidated result lives in data/output/tuning_report.json, which is tracked;
 # these 30+ intermediates are regenerable and only clutter the tree.
