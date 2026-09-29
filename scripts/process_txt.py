@@ -112,14 +112,16 @@ def server_health(api_url: str, timeout: float) -> dict:
     try:
         response = requests.get(url, timeout=timeout)
     except Exception as exc:
-        raise SystemExit(f"[process_txt] cannot reach the TTS server at {url}: {exc}")
+        raise SystemExit(
+            f"[process_txt] cannot reach the TTS server at {url}: {exc}"
+        ) from exc
     try:
         return response.json()
     except Exception as exc:
         raise SystemExit(
             f"[process_txt] {url} returned a non-JSON payload "
             f"(HTTP {response.status_code}): {exc}"
-        )
+        ) from exc
 
 
 def wait_until_ready(api_url: str, timeout: float, wait_seconds: float) -> dict:

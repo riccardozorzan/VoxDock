@@ -114,8 +114,11 @@ re-downloaded.
 ├── Dockerfile                 # CUDA 12.8 runtime + torch cu128 + dots.tts
 ├── docker-compose.yml         # GPU reservation, non-root user, 3 volumes
 ├── .env.example               # every tunable (copied to .env)
-├── requirements.txt
+├── requirements.txt           # the *container's* dependency set
+├── requirements-dev.txt       # host-side + CI: pytest and ruff, nothing else
+├── pyproject.toml             # ruff config, so the linter is the same everywhere
 ├── pytest.ini
+├── .github/workflows/ci.yml   # pytest + check_identity.py + ruff on every push
 ├── app/
 │   ├── config.py              # settings: env -> best_config.json -> defaults
 │   ├── patches.py             # low-VRAM patches for dots.tts (6 GB cards)
@@ -677,9 +680,15 @@ handle it downstream.
 
   ```bash
   python3 -m venv /tmp/voxdock-venv
-  /tmp/voxdock-venv/bin/pip install pytest requests
-  PYTHONPYCACHEPREFIX=/tmp/voxdock-pyc /tmp/voxdock-venv/bin/python -m pytest -q
+  /tmp/voxdock-venv/bin/pip install -r requirements-dev.txt   # pytest + ruff
+  export PYTHONPYCACHEPREFIX=/tmp/voxdock-pyc
+  /tmp/voxdock-venv/bin/python -m pytest                      # the suite
+  python scripts/check_identity.py                            # the guard
+  /tmp/voxdock-venv/bin/ruff check app scripts tests          # the lint
   ```
+
+  Those are the same three checks `.github/workflows/ci.yml` runs on every push,
+  on python 3.10 (the image's interpreter) and 3.13.
 * **Never `git clean -X` here.** "Ignored" does not mean "disposable": the voice
   recordings (`data/speakers/`, `data/references/*.wav`), the reference clips
   (`data/input/ref_*.wav`) and the 85 MB ECAPA cache (`data/.speechbrain/`) are

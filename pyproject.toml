@@ -1,0 +1,25 @@
+# Ruff configuration. The point of committing it: "run the linter" must mean the
+# same thing on every machine and in CI. Without it the rule set depended on
+# whichever ruff version happened to be installed - a local run once reported 169
+# findings purely because the machine's selection was wider.
+#
+# The selection is deliberately narrow - correctness, not style:
+#   E4/E7/E9 + F  syntax, undefined names, unused imports, f-string mistakes
+#   B             bugbear patterns (raise-from, mutable defaults, blind excepts)
+# Style sweeps (UP, I, RUF, SIM, PLR) are not enabled yet: they report ~130 nits
+# that carry no behaviour and would bury a real finding in the noise. Turn them on
+# one at a time, with the autofixer, when you actually want that churn.
+
+[tool.ruff]
+line-length = 88
+# The image is Ubuntu 22.04 (python 3.10); a host may be newer.
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# FastAPI's dependency-injection style puts `File(...)` / `Form(...)` calls in the
+# parameter defaults. That is the documented pattern, not the mutable default
+# B008 warns about.
+"app/main.py" = ["B008"]

@@ -384,9 +384,7 @@ async def health(request: Request) -> JSONResponse:
             "best_config_path": str(settings.paths.output_dir / "best_config.json"),
         },
         "speakers": {
-            "registered": len(getattr(state, "speakers").list())
-            if getattr(state, "speakers", None)
-            else 0,
+            "registered": len(state.speakers.list()) if state.speakers else 0,
         },
         "vram_limit_gb": settings.model.vram_limit_gb,
         "vram_within_limit": (

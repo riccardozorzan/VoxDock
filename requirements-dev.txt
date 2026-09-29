@@ -1,0 +1,14 @@
+# Host-side development and CI dependencies.
+#
+# Deliberately NOT requirements.txt: that file is the *container's* dependency set
+# (torch, dots.tts, CUDA-era wheels), and the host-side suite is torch-free by
+# design - no GPU, no running server, 126 tests in about 0.1 s.
+#
+# `requests` is not needed here: every client script imports it lazily inside the
+# function that uses it, so the suite passes with pytest alone. That was verified
+# in a bare virtualenv, which is what this file encodes.
+
+pytest>=8.0
+# Pinned to a range rather than an exact version: the rule *set* that matters is
+# in pyproject.toml, and pinning a patch would make CI fail on unrelated releases.
+ruff>=0.9,<1.0

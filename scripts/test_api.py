@@ -89,7 +89,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             response = requests.get(health_url, timeout=30)
             health = response.json()
         except Exception as exc:  # noqa: BLE001
-            raise SystemExit(f"[test_api] cannot reach the API: {exc}")
+            raise SystemExit(f"[test_api] cannot reach the API: {exc}") from exc
         if health.get("ready") or time.time() >= deadline:
             break
         print(f"[test_api]   status={health.get('status')} - waiting ...")

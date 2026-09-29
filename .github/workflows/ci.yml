@@ -1,0 +1,55 @@
+# The suite is torch-free and runs in well under a second, so CI here is not
+# about building anything - it is about catching *drift*. Two of these checks
+# exist because that exact regression already shipped unnoticed:
+#
+#   * scripts/check_identity.py exited 1 on every run for six commits, from the
+#     moment 8c7af37 added the uid/gid variables, until tests/test_identity.py
+#     was there to run it;
+#   * TTS_API_TITLE / TTS_API_VERSION were advertised in .env.example and silently
+#     dropped by compose, until tests/test_compose_env.py was there to notice.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  host:
+    name: host suite (python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.10 is the interpreter inside the image (Ubuntu 22.04); 3.13 keeps the
+        # host side honest about newer syntax and stdlib behaviour.
+        python-version: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dev dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Tests
+        run: python -m pytest
+
+      - name: Deployment identity guard
+        run: python scripts/check_identity.py
+
+      - name: Lint
+        run: ruff check app scripts tests
+
+      - name: The README test count is not a lie
+        if: matrix.python-version == '3.10'
+        run: |
+          count=$(python -m pytest --collect-only 2>/dev/null | tail -1 | grep -oE '^[0-9]+')
+          if ! grep -q "$count host-side tests" README.md; then
+            echo "::error::README.md does not say '$count host-side tests' - update the count in section 2"
+            exit 1
+          fi
+          echo "README.md test count matches ($count)"

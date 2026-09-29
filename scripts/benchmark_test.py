@@ -110,7 +110,9 @@ def get_health(api_url: str, timeout: float) -> dict[str, Any]:
     try:
         response = requests.get(url, timeout=timeout)
     except Exception as exc:  # noqa: BLE001
-        raise SystemExit(f"[benchmark] cannot reach the TTS server at {url}: {exc}")
+        raise SystemExit(
+            f"[benchmark] cannot reach the TTS server at {url}: {exc}"
+        ) from exc
     latency_ms = round((time.perf_counter() - started) * 1000, 2)
     try:
         payload = response.json()
@@ -118,7 +120,7 @@ def get_health(api_url: str, timeout: float) -> dict[str, Any]:
         raise SystemExit(
             f"[benchmark] {url} returned a non-JSON payload "
             f"(HTTP {response.status_code}): {exc}"
-        )
+        ) from exc
     payload["_http_status"] = response.status_code
     payload["_latency_ms"] = latency_ms
     return payload
