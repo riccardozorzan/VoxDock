@@ -93,6 +93,12 @@ services:
 
       # ---- service plumbing ----
       TTS_LOG_LEVEL: ${TTS_LOG_LEVEL:-info}
+      # Host thread count. Measured A/B on this host (5 timed requests, 2 warmups
+      # each): OMP=8 -> engine RTF 0.4361, OMP=16 -> 0.4322. A real but ~0.9%
+      # gain, so 8 stays the default - it is within run-to-run noise and is
+      # safer on a laptop that is also doing other work. Raise it to your
+      # physical core count (`nproc`) if you want the last percent.
+      OMP_NUM_THREADS: ${OMP_NUM_THREADS:-8}
       TTS_API_URL: ${TTS_API_URL:-http://localhost:8000}
       HF_HOME: /cache/huggingface
       HF_TOKEN: ${HF_TOKEN:-}

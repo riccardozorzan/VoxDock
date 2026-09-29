@@ -567,6 +567,22 @@ handle it downstream.
 
 ## 7. Operational notes
 
+* **The first request after a restart is 2-3x the steady cost, not 20x.** It
+  used to look far worse (RTF 3.3-8.7) because the warmup compiles a 10.5 s
+  utterance while a short first request hits a shape it has not seen. Measured
+  on a fresh container, the first *short* request runs at RTF 0.74 and settles
+  to 0.66-0.69 by the fourth. A first *long* request (~13 s) is essentially
+  free, because that is close to the warmup shape. The earlier "RTF 3.3 on the
+  first request" figures in this document came from measuring against a
+  different audio length than the service had been warmed on, not from a real
+  regression.
+* **The 6.5% host-idle figure did not translate into a meaningful speedup.**
+  `OMP_NUM_THREADS=16` (this host's physical core count) measured engine RTF
+  0.4322 against 0.4361 at 8 — about 0.9%, inside run-to-run noise. So that
+  idle time is not CPU thread starvation; it is more likely kernel-launch
+  overhead. If you want the last percent, set `OMP_NUM_THREADS` to `nproc`;
+  it is exposed as a variable for that reason. The bigger lever would be
+  re-enabling CUDA graphs, which `app/patches.py` disables for VRAM reasons.
 * **Cold start is `torch.compile`, and it is cached.** The warmup walks every
   reachable DiT bucket and vocoder chunk size, and Inductor spends ~105 s
   generating CUDA kernels before the GPU does any useful work. Those kernels go
