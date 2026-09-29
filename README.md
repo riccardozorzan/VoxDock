@@ -34,6 +34,12 @@ docker compose exec tts python scripts/benchmark_test.py
 # 3) long-form batch synthesis
 docker compose exec tts python scripts/process_txt.py \
     -i data/input/test_audio_sample.txt
+
+# 4) does it actually sound like the speaker?
+#    RTF and VRAM cannot answer this; ECAPA-TDNN cosine similarity can.
+docker compose exec tts python scripts/speaker_similarity.py \
+    --reference data/references/my_voice_v2.wav \
+    --generated data/output/test_audio_sample.wav
 ```
 
 The transcripts under `data/references/` and `data/input/` are committed, but
@@ -381,21 +387,47 @@ at the end unless `--keep-running` is passed.
 
 ### Measured behaviour on the RTX 4050 (6 GB)
 
-The tuned model is `generation ≈ 0.98 s + 0.373 × audio_seconds`, i.e.
-`RTF ≈ 0.373 + 0.98 / audio_seconds`:
+The tuned model is `generation ≈ 0.79 s + 0.413 × audio_seconds`, i.e.
+`RTF ≈ 0.413 + 0.79 / audio_seconds` (fitted over 34 calls during the sweep):
 
 | audio length | RTF |
 |---|---|
-| 3.4 s | 0.65 |
-| 9.1 s | 0.48 |
-| 13.3 s | 0.45 |
-| 16.5 s | 0.43 |
+| 3.5 s | 0.64 |
+| 9.1 s | 0.50 |
+| 13.4 s | 0.47 |
 
-So **RTF ≤ 0.5 needs ≳ 7.7 s of audio per request on this GPU.** The ~1 s
+So **RTF ≤ 0.5 needs ≳ 9.1 s of audio per request on this GPU.** The 0.79 s
 per-request fixed cost is independent of the reference length (measured across
 26/46/72-patch references), so it cannot be tuned away — short utterances are
 bounded by it. For short text either accept a higher RTF or batch sentences into
 one request; `process_txt.py` already batches by default.
+
+The tuned configuration (`best_config.json`, from `autotune.py --quick`) raises
+`TTS_VOCODER_CHUNK_PATCHES` from 12 to 32, which improved the long-form pipeline
+from RTF 0.690 to 0.469 with no change in peak VRAM (5451.9 MB).
+
+### Speaker similarity
+
+RTF and VRAM say nothing about whether the output sounds like the speaker, so
+`scripts/speaker_similarity.py` measures it directly with ECAPA-TDNN. Measured
+on this host, reference `my_voice_v2.wav`:
+
+| clip | cosine | what it is |
+|---|---:|---|
+| `my_voice_v1.wav` | 0.7146 | a **real** second recording of the same speaker |
+| `test_audio_sample.wav` | **0.7583** | 48.5 s of TTS output, long-form |
+| `test_api.wav` | 0.6392 | 2.9 s of TTS output, short |
+
+The long-form synthesis scores *above* the real second recording of the same
+person, which is the meaningful result: the clone is not a degradation against
+genuine same-speaker speech. The short 2.9 s clip scores lower simply because a
+3-second sample gives the speaker encoder less to work with — a limitation of
+measuring short audio, not of the synthesis.
+
+These are cosine similarities, so they are only interpretable relative to each
+other. The script always reports a self-similarity ceiling (1.0000 here) and
+accepts `--impostor` for a different speaker as the floor; without both, an
+absolute threshold would be meaningless.
 
 ---
 
