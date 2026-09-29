@@ -133,7 +133,7 @@ re-downloaded.
 │   ├── latency_report.py      # cold start / first request / steady state
 │   ├── check_identity.py      # assert compose matches app/__init__.py
 │   └── test_api.py            # smoke test; --assert for CI
-├── tests/                     # 117 host-side tests, no GPU needed (~0.1 s)
+├── tests/                     # 126 host-side tests, no GPU needed (~0.1 s)
 │   ├── conftest.py            # fixtures: isolated env, reloadable config
 │   ├── test_config.py         # the three-tier settings chain
 │   ├── test_speakers.py       # registry CRUD + path-traversal defence
@@ -142,6 +142,7 @@ re-downloaded.
 │   ├── test_patches.py        # the low-VRAM patch guard
 │   ├── test_api_smoke.py      # the --assert smoke test
 │   ├── test_ui.py             # /ui asset: endpoints, DOM ids, escaping
+│   ├── test_compose_env.py    # every TTS_* the app reads reaches the container
 │   └── test_identity.py       # compose vs app/Dockerfile identity drift guard
 └── data/
     ├── references/            # raw reference .wav + transcript .txt

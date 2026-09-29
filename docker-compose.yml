@@ -92,6 +92,29 @@ services:
       TTS_WORDS_PER_SECOND: ${TTS_WORDS_PER_SECOND:-2.5}
       TTS_MAX_RETRIES: ${TTS_MAX_RETRIES:-3}
 
+      # ---- API metadata + limits (override-only) ----
+      # Compose injects ONLY the variables listed in this block: one that
+      # app/config.py reads but that is missing here is silently ignored inside
+      # the container, even when `.env.example` documents it. `.env.example`
+      # advertises TTS_API_TITLE / TTS_API_VERSION, so those two were exactly
+      # that trap. The defaults below mirror app/config.py; a test
+      # (tests/test_compose_env.py) fails if that ever drifts.
+      TTS_API_TITLE: ${TTS_API_TITLE:-VoxDock}
+      TTS_API_VERSION: ${TTS_API_VERSION:-1.0.0}
+      TTS_API_DESCRIPTION: "${TTS_API_DESCRIPTION:-Containerised high-fidelity local TTS service built on dots.tts}"
+      TTS_DEVICE: ${TTS_DEVICE:-cuda}
+      TTS_MAX_UPLOAD_MB: ${TTS_MAX_UPLOAD_MB:-64}
+      TTS_REQUEST_TIMEOUT: ${TTS_REQUEST_TIMEOUT:-900.0}
+      TTS_CONNECT_TIMEOUT: ${TTS_CONNECT_TIMEOUT:-10.0}
+      # Deliberately NOT forwarded - inside the container each of these is either
+      # fixed by the image or a footgun, not a knob:
+      #   TTS_HOST / TTS_PORT             compose publishes the port; uvicorn binds 0.0.0.0:8000
+      #   TTS_DATA_DIR / TTS_PROJECT_ROOT /app and /app/data are correct by construction
+      #   TTS_BEST_CONFIG                 a host path does not exist in the container, so
+      #                                   load_best_config() would warn and fall back to the
+      #                                   built-in defaults instead of the bind-mounted
+      #                                   /app/data/output/best_config.json
+
       # ---- service plumbing ----
       TTS_LOG_LEVEL: ${TTS_LOG_LEVEL:-info}
       # Host thread count. Measured A/B on this host (5 timed requests, 2 warmups
