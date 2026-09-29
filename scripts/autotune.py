@@ -1075,7 +1075,16 @@ def write_best_config(
             value = logger_value  # keep the string; the service will fall back
         settings[key] = value
 
-    record = next((r for r in evaluator.records if r.config == winner), None)
+    # A config can be measured more than once in one sweep: the incumbent
+    # baseline is evaluated (and often rejected) before the dimension that
+    # already holds it is reached, at which point the same config is evaluated
+    # again and wins. Picking the *first* match would therefore attach the
+    # baseline's rejected numbers - a null score and a worst_rtf above the
+    # target - to a profile that actually passed. Prefer the feasible record.
+    matching = [r for r in evaluator.records if r.config == winner]
+    record = next((r for r in matching if r.feasible), None) or (
+        matching[0] if matching else None
+    )
     payload: dict[str, Any] = {
         "generated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "generated_by": "scripts/autotune.py",
@@ -1143,11 +1152,16 @@ def _variant_comparison(
                 "best_rtf": None,
                 "min_peak_vram_mb": None,
                 "best_score": None,
-                "is_winner": record.config == winner,
+                "is_winner": False,  # set below; the first record is often the
+                # rejected incumbent baseline, not the winning measurement
                 "last_error": None,
             },
         )
         row["attempts"] += 1
+        if record.config == winner:
+            # Marked here rather than at setdefault(): the winner config is
+            # usually measured twice, and only the later, feasible pass counts.
+            row["is_winner"] = True
         if not record.feasible:
             row["last_error"] = (record.rejected or row["last_error"] or "")[:200] or None
             continue
