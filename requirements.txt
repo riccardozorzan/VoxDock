@@ -23,3 +23,9 @@ noisereduce>=3.0.3
 # ---- Client scripts (process_txt.py / benchmark_test.py / test_api.py) ----
 requests>=2.32.3
 psutil>=6.1.0
+
+# ---- Speaker-similarity scoring (scripts/speaker_similarity.py, todo 4.2) ---
+# ECAPA-TDNN via speechbrain. CPU-sized (~22 MB), so it does not compete with
+# the TTS engine for the 6 GB of VRAM. This is the only way to answer "does it
+# actually sound like the speaker?", which RTF and peak-VRAM cannot.
+speechbrain>=1.0
