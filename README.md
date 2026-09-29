@@ -71,6 +71,7 @@ Project identity is declared once, in `app/__init__.py`:
 | `COMPOSE_PROJECT` | `voxdock` | compose project namespace |
 | `LOG_NAMESPACE` | `voxdock` | our logger namespace (`voxdock.api`, …) |
 | `HF_CACHE_VOLUME` | `local_tts_hf_cache` | the weight cache volume |
+| `INDUCTOR_CACHE_VOLUME` | `voxdock_inductor_cache` | the torch.compile kernel cache volume |
 
 Docker Compose cannot read Python, so `docker-compose.yml` repeats these as
 inline `${VAR:-default}` fallbacks. To catch drift:
@@ -247,14 +248,34 @@ rather than silently ignored.
    call, which `--max-words auto` reports as ~33 words. `clean_audio.py --trim-to`
    exists for exactly this reason — remember to shorten the transcript to match.
 
-4. **`num_steps` is coupled to the memory budget.** The DiT KV cache is allocated
+3. **`num_steps` is coupled to the memory budget.** The DiT KV cache is allocated
    as `(num_steps, layers, heads, tokens, dim)`, so every extra sampling step
    doubles it. `dots.tts-mf` is a MeanFlow model whose native step count is **2**,
-   and the shipped configuration uses 2: 128 patches then peak at 5.36 GB. At 4
-   steps the same 128-patch budget OOMs — drop `TTS_MAX_GENERATE_LENGTH` to 96 if
-   you raise `TTS_NUM_STEPS`.
+   and the tuned configuration uses 2.
 
-5. **Three upstream memory bugs had to be patched.** See `app/patches.py`. On a
+   Earlier revisions of this document said 4 steps OOMs at 128 patches. **That is
+   no longer true**: the tuned `vocoder_chunk_patches=32` (up from 12) freed
+   enough headroom that 4 steps now fits, measured at 5518 MB peak. It costs
+   +17 % generation time and buys +0.021 speaker similarity — see §6. The
+   coupling is real; whether it binds at 4 steps on this card no longer does.
+
+4. **`model_variant` is a startup setting, not a per-request parameter.** The
+   spec asks for a per-request model/variant switch. Two checkpoints cannot
+   co-exist in 6 GB — the weights alone are 4.55 GiB each — so switching variant
+   would mean evicting and reloading the model inside a request.
+   `TTS_MODEL_NAME` is therefore read once at startup:
+
+   ```bash
+   TTS_MODEL_NAME=dots-studio/dots.tts-soar docker compose up -d
+   ```
+
+5. **Speaker similarity has no absolute pass/fail threshold.** The spec cites
+   "SIM > 83", a percentage on a different model's scale. The cosine similarity
+   measured in §6 is a different metric on a different scale, meaningful only
+   against its two controls, so this project asserts no threshold for it.
+
+
+6. **Three upstream memory bugs had to be patched.** See `app/patches.py`. On a
    6 GB card the stock path does not fit at all, for reasons independent of the
    checkpoint's own published memory table:
 
@@ -267,10 +288,13 @@ rather than silently ignored.
    * `generate_audio` decodes the whole utterance through BigVGAN in one shot, so
      the decoder's activation peak grows with the audio length.
 
-   All three patches are no-ops if a future `dots_tts` release changes shape, and
-   `TTS_LOW_VRAM_PATCHES=false` disables them.
+   Each patch is a no-op if a future `dots_tts` release changes shape, so startup
+   now *asserts* they applied rather than logging and continuing: on this card a
+   missing patch means the configuration no longer fits, and a silent warning
+   would surface minutes later as a confusing OOM. `TTS_LOW_VRAM_PATCHES=false`
+   disables them and logs a warning saying to expect an OOM.
 
-3. **Base image.** The spec asked for `nvidia/cuda:12.1.1` + torch cu121.
+7. **Base image.** The spec asked for `nvidia/cuda:12.1.1` + torch cu121.
    `dots.tts 0.3.x` requires `torch>=2.8`, and PyTorch stopped publishing cu121
    wheels after 2.5.x. The image therefore uses
    `nvidia/cuda:12.8.1-runtime-ubuntu22.04` with cu128 wheels — the stack
@@ -520,12 +544,30 @@ samples would be needed to claim significance.
 
 ## 7. Operational notes
 
-* **Cold start** is dominated by `torch.compile`: the warmup walks every reachable
-  DiT bucket and vocoder chunk size. Expect minutes, not seconds. The Docker
-  health check allows up to an hour (`--start-period=3600s`) and keeps returning
-  `503` until the engine is genuinely ready.
+* **Cold start is `torch.compile`, and it is cached.** The warmup walks every
+  reachable DiT bucket and vocoder chunk size, and Inductor spends ~105 s
+  generating CUDA kernels before the GPU does any useful work. Those kernels go
+  to `/tmp` by default, which is *not* a volume, so they were discarded on every
+  restart. `TORCHINDUCTOR_CACHE_DIR` now points at the `inductor_cache` volume:
+
+  | | cold start |
+  |---|---:|
+  | first run (populating the cache) | 219 s |
+  | every later restart | **69 s** |
+
+  Losing that volume costs one slow startup and nothing else. The Docker health
+  check still allows up to an hour (`--start-period=3600s`) and returns `503`
+  until the engine is genuinely ready.
+* **The container runs as you, not root.** `user: "${VOXDOCK_UID:-1000}:${VOXDOCK_GID:-1000}"`
+  keeps everything written into `./data` owned by you, so nothing needs `sudo`
+  to fix. If your uid is not 1000, set `VOXDOCK_UID`/`VOXDOCK_GID` in `.env`
+  **and rebuild** — the uid must match the `/etc/passwd` entry baked into the
+  image, or startup dies with `getpwuid(): uid not found`. A non-root uid cannot
+  write to `/root`, which is why `HF_HOME` points at a tmpfs at `/cache`.
 * **The `hf_cache` volume** (`local_tts_hf_cache`) keeps the ~4.4 GB of weights
-  across rebuilds — only delete it if you want to re-download.
+  across rebuilds — only delete it if you want to re-download. It was created
+  under the pre-rename `local-tts-docker` project, so compose prints a harmless
+  warning about it on every `up`; renaming the volume would orphan the weights.
 * **Changing `TTS_MAX_GENERATE_LENGTH`** needs `docker compose up -d` (it is a
   load-time parameter) and triggers a fresh compile warmup.
 * **Concurrency** is serialised by an `asyncio.Lock`: one 6 GB GPU cannot serve
@@ -552,4 +594,11 @@ samples would be needed to claim significance.
 | `HTTP 400 … max_generate_length must exceed prompt audio patch count` | reference too long → `clean_audio.py --trim-to 6.5` |
 | audio sounds truncated | the request hit `max_generate_length`; lower `--max-words` or raise the cap after measuring real headroom |
 | `process_txt.py` reports 0 usable chunks | the input `.txt` is empty after whitespace normalisation |
+| `getpwuid(): uid not found: 1000` | `VOXDOCK_UID`/`VOXDOCK_GID` do not match the image's `/etc/passwd` entry — set them in `.env` and `docker compose up -d --build` |
+| `PermissionError` on `data/.speechbrain/…` | the similarity model cache holds symlinks into `/root`, which a non-root uid cannot read. Delete `data/.speechbrain/` and re-run the script to rebuild it as real files |
+| `low-VRAM patches did not apply: …` at startup | `dots.tts` was upgraded and renamed a symbol a patch needs. Pin `dots.tts==0.3.1`, or set `TTS_LOW_VRAM_PATCHES=false` and lower `TTS_MAX_GENERATE_LENGTH` |
+| every restart takes ~3.5 min again | the `inductor_cache` volume was deleted; it repopulates on the next start |
+| `volume "local_tts_hf_cache" was created for project "local-tts-docker"` | expected and harmless — the volume predates the rename and keeps the ~4.4 GB of weights |
+| first request after a restart is slow (RTF > 2) | expected: it pays any compile the warmup did not cover. The second request is representative |
+| `speechbrain is not installed` | it is in `requirements.txt`; rebuild the image |
 
