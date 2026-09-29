@@ -54,7 +54,10 @@ logger = logging.getLogger(f"{LOG_NAMESPACE}.patches")
 
 __all__ = [
     "VOCODER_CHUNK_PATCHES",
+    "REQUIRED_PATCHES",
+    "PatchFailure",
     "apply_patches",
+    "assert_patches_applied",
     "disable_cudagraphs",
     "patch_fused_adaln_inplace",
     "patch_generate_audio",
@@ -67,6 +70,50 @@ VOCODER_CHUNK_PATCHES = 12
 
 # Guard so repeated calls (e.g. a reload or a second import path) stay cheap.
 _APPLIED = False
+
+#: The patches that MUST have applied on a 6 GB card, keyed by the name
+#: :func:`apply_patches` reports. Losing any of these is not a graceful
+#: degradation - the process starts and then OOMs at ``max_generate_length=128``
+#: some minutes later, with nothing in the log but a single WARNING line pointing
+#: at an upstream rename. :func:`assert_patches_applied` turns that into a loud,
+#: immediate failure instead.
+REQUIRED_PATCHES = ("compile", "fused_adaln", "generate_audio")
+
+
+class PatchFailure(RuntimeError):
+    """A low-VRAM patch that is required on this GPU did not apply.
+
+    Raised by :func:`assert_patches_applied`. This is deliberately fatal rather
+    than a warning: on a 6 GB card these patches are what make the verified
+    configuration fit at all, and silently running without them trades a clear
+    error message for a confusing OOM minutes later.
+    """
+
+
+def assert_patches_applied(
+    result: dict[str, bool], *, required: tuple[str, ...] = REQUIRED_PATCHES
+) -> None:
+    """Raise :class:`PatchFailure` if any required patch did not apply.
+
+    The patches are best-effort by nature - each one is guarded so a future
+    ``dots.tts`` release degrades to stock behaviour instead of crashing at
+    import. That is the right default *when the patches are optional*, but on
+    this hardware they are not: the stock path needs roughly 600 MB more than a
+    6 GB card has. So the outcome is reported once, loudly, at startup.
+    """
+    missing = [name for name in required if not result.get(name)]
+    if missing:
+        raise PatchFailure(
+            "low-VRAM patches did not apply: "
+            + ", ".join(missing)
+            + f" (got {result}). This GPU needs them to fit "
+            "max_generate_length=128; without them the service will almost "
+            "certainly OOM during warmup or the first request. Either pin "
+            "dots.tts to a compatible version, or set "
+            "TTS_LOW_VRAM_PATCHES=false to run unpatched and accept the lower "
+            "TTS_MAX_GENERATE_LENGTH. See app/patches.py and the startup log for "
+            "which upstream symbol each patch could not find."
+        )
 
 
 

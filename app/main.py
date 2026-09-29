@@ -71,9 +71,20 @@ def load_runtime() -> dict[str, Any]:
     # solver, because that is the point where the AdaLN fusion happens.
     patches = {"compile": False, "fused_adaln": False, "generate_audio": False}
     if settings.model.low_vram_patches:
-        from app.patches import apply_patches
+        from app.patches import apply_patches, assert_patches_applied
 
         patches = apply_patches(settings.model.vocoder_chunk_patches)
+        # Each patch is individually guarded so a future dots.tts rename degrades
+        # instead of crashing, but on a 6 GB card a missing patch means the
+        # verified configuration no longer fits. Fail here, immediately and
+        # legibly, rather than OOMing minutes into the warmup.
+        assert_patches_applied(patches)
+    else:
+        logger.warning(
+            "TTS_LOW_VRAM_PATCHES=false: running the stock inference path. On a "
+            "6 GB card this needs roughly 600 MB more than is available, so "
+            "expect an OOM at max_generate_length=128 and lower it if it fails."
+        )
 
     precision = resolve_precision(settings.model.precision)
     logger.info(
