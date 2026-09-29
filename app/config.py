@@ -34,6 +34,7 @@ __all__ = [
     "ModelSettings",
     "APISettings",
     "ProcessingSettings",
+    "SecuritySettings",
     "Settings",
     "settings",
     "best_config",
@@ -368,6 +369,92 @@ class APISettings:
         )
 
 
+
+
+@dataclass(frozen=True)
+class SecuritySettings:
+    """Authentication, abuse limits and the exposure guard (``TODO`` P0).
+
+    Every default here is *off* in the sense that matters for a local-first
+    tool: with no ``api_keys`` the service is open, and with the default
+    ``publish_addr`` it is only reachable from this machine. The limits are not
+    off - they are on, but set high enough not to interfere with the pipeline
+    this project actually runs.
+
+    The defaults for the text and audio caps are derived from the measured
+    configuration, not picked to feel safe. ``max_text_chars`` is 5x the
+    largest chunk ``scripts/process_txt.py`` will ever send (35 words, from
+    ``TTS_CHUNK_MAX_WORDS``), so the long-form pipeline cannot trip the cap,
+    while a client pasting a whole chapter gets a clear 413 instead of a
+    synthesis that silently overruns the patch budget. ``max_audio_seconds`` is
+    the 20.48 s that 128 patches of 160 ms can hold, minus the reference
+    prompt, so the service refuses work it cannot fit rather than OOMing
+    mid-generation.
+    """
+
+    # -- authentication ----------------------------------------------------
+    #: Parsed credentials. Environment-only, never read from a tuned profile:
+    #: ``best_config.json`` is committed, and a secret that lives there is a
+    #: secret that has leaked.
+    api_keys: tuple[Any, ...] = ()
+    #: Accept ``Authorization: Bearer <key>`` as well as ``X-API-Key``.
+    allow_bearer: bool = True
+
+    # -- exposure ----------------------------------------------------------
+    #: The *host* address the port is published on, passed in by compose from
+    #: the same ``TTS_BIND_HOST`` that drives ``ports:``. See
+    #: :func:`app.security.evaluate_exposure` for why this is not the bind host.
+    publish_addr: str = "127.0.0.1"
+    #: Escape hatch for an operator who has a reverse proxy or VPN in front.
+    #: Never set this to silence a warning you have not thought about.
+    allow_remote: bool = False
+    #: Best-effort container detection for the host-run case.
+    in_container: bool = True
+
+    # -- rate limiting -----------------------------------------------------
+    #: Requests per minute per key (or per peer address when open). 0 disables.
+    rate_limit_rpm: int = 30
+    rate_limit_window_s: float = 60.0
+
+    # -- bounded queue -----------------------------------------------------
+    #: Requests allowed to hold or wait for the GPU. 0 means "no queue at all":
+    #: every request beyond the one in flight is refused immediately.
+    max_queue_size: int = 4
+    #: Bound on registered voices, so a loop of register calls cannot fill the
+    #: disk. 0 disables.
+    max_speakers: int = 50
+
+    # -- input caps --------------------------------------------------------
+    max_text_chars: int = 2000
+    max_reference_seconds: float = 20.0
+    max_audio_seconds: float = 20.0
+
+    @property
+    def auth_enabled(self) -> bool:
+        return bool(self.api_keys)
+
+    @classmethod
+    def from_env(cls) -> "SecuritySettings":
+        # Imported here rather than at module scope: app.config is imported by
+        # the autotuner and the client scripts, and this keeps the dependency
+        # one-way (config -> security) and lazily evaluated.
+        from app.security import parse_api_keys
+
+        raw_keys = os.environ.get("TTS_API_KEYS")
+        return cls(
+            api_keys=parse_api_keys(raw_keys),
+            allow_bearer=_bool("TTS_ALLOW_BEARER", True),
+            publish_addr=_str("TTS_PUBLISH_ADDR", "127.0.0.1"),
+            allow_remote=_bool("TTS_ALLOW_REMOTE", False),
+            in_container=Path("/.dockerenv").exists(),
+            rate_limit_rpm=_int("TTS_RATE_LIMIT_RPM", 30),
+            rate_limit_window_s=_float("TTS_RATE_LIMIT_WINDOW_S", 60.0),
+            max_queue_size=_int("TTS_MAX_QUEUE_SIZE", 4),
+            max_speakers=_int("TTS_MAX_SPEAKERS", 50),
+            max_text_chars=_int("TTS_MAX_TEXT_CHARS", 2000),
+            max_reference_seconds=_float("TTS_MAX_REFERENCE_SECONDS", 20.0),
+            max_audio_seconds=_float("TTS_MAX_AUDIO_SECONDS", 20.0),
+        )
 @dataclass(frozen=True)
 class ProcessingSettings:
     """Reference-audio cleaning and long-text chunking parameters."""
@@ -425,6 +512,7 @@ class Settings:
     model: ModelSettings
     api: APISettings
     processing: ProcessingSettings
+    security: SecuritySettings
     log_level: str = "info"
 
     @classmethod
@@ -434,6 +522,7 @@ class Settings:
             model=ModelSettings.from_env(),
             api=APISettings.from_env(),
             processing=ProcessingSettings.from_env(),
+            security=SecuritySettings.from_env(),
             log_level=_str("TTS_LOG_LEVEL", "info"),
         )
 

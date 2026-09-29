@@ -12,3 +12,12 @@ pytest>=8.0
 # Pinned to a range rather than an exact version: the rule *set* that matters is
 # in pyproject.toml, and pinning a patch would make CI fail on unrelated releases.
 ruff>=0.9,<1.0
+
+# The HTTP layer, for tests/test_api_security.py. Still no torch: app.utils
+# imports it lazily, so the ASGI app is importable on a bare interpreter and
+# these tests exercise authentication, scopes, the queue and consent without a
+# GPU or a running container. That is the whole reason app/security.py is a
+# separate, framework-free module.
+fastapi>=0.110,<1.0
+httpx>=0.27
+python-multipart>=0.0.9

@@ -10,7 +10,7 @@ Package layout
 
 __title__ = "VoxDock"
 __package_name__ = "voxdock-tts"
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __description__ = "Containerised high-fidelity local TTS service built on dots.tts"
 
 # --------------------------------------------------------------------------- #

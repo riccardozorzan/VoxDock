@@ -11,13 +11,12 @@ on a laptop RTX 4050 (6 GB). Nothing is installed on the host except Docker.
   with live VRAM telemetry.
 * **Pipeline** — `clean_audio.py` → `process_txt.py` → `benchmark_test.py`.
 
-**What `v1.0.0` is.** The local-first release: a single-user service, published on
-`127.0.0.1` by default, with **no authentication of its own** — the port binding is
-the only thing protecting it. The production gate (authentication, a bounded
-request queue, rate limiting, a pinned model revision, reproducible image builds)
-is tracked separately in `TODO/`, which is deliberately not committed here. What
-this tag *does* claim is measured, and every number below points at the artefact
-it came from.
+**What `v1.0.0` is.** The local-first release: a single-user service on `127.0.0.1`.
+It has **no authentication of its own** — the port binding is the only thing
+protecting it. That is fine on loopback and is why publishing it anywhere else
+is refused unless you turn on keys or explicitly accept the risk; see
+[section 6](#6-security). What the tag *does* claim is measured, and every number
+below points at the artefact it came from.
 
 ---
 
@@ -123,14 +122,15 @@ re-downloaded.
 ├── docker-compose.yml         # GPU reservation, non-root user, 3 volumes
 ├── .env.example               # every tunable (copied to .env)
 ├── requirements.txt           # the *container's* dependency set
-├── requirements-dev.txt       # host-side + CI: pytest and ruff, nothing else
+├── requirements-dev.txt       # host-side + CI: pytest, ruff, fastapi
 ├── pyproject.toml             # ruff config, so the linter is the same everywhere
 ├── pytest.ini
 ├── .github/workflows/ci.yml   # pytest + check_identity.py + ruff on every push
-├── LICENSE                    # non-commercial (CC BY-NC 4.0), see section 9
+├── LICENSE                    # non-commercial (CC BY-NC 4.0), see section 10
 ├── app/
 │   ├── config.py              # settings: env -> best_config.json -> defaults
 │   ├── patches.py             # low-VRAM patches for dots.tts (6 GB cards)
+│   ├── security.py            # auth, scopes, rate limit, queue, exposure guard
 │   ├── speakers.py            # speaker registry (register once, reuse by id)
 │   ├── utils.py               # GPU telemetry, WAV buffers, temp files
 │   ├── static/index.html      # the /ui web page (self-contained, no build)
@@ -147,7 +147,7 @@ re-downloaded.
 │   ├── test_api.py            # smoke test; --assert for CI
 │   ├── make_reference_set.py  # write the autotuner's reference_set.json
 │   └── fetch_dev_audio.py     # fetch the public ECAPA control clips
-├── tests/                     # 143 host-side tests, no GPU needed (~0.1 s)
+├── tests/                     # 274 host-side tests, no GPU needed (~0.6 s)
 │   ├── conftest.py            # fixtures: isolated env, reloadable config
 │   ├── test_config.py         # the three-tier settings chain
 │   ├── test_speakers.py       # registry CRUD + path-traversal defence
@@ -177,11 +177,17 @@ re-downloaded.
 `200` once the checkpoint is resident, `503` while loading (so the Docker health
 check waits for the *engine*, not just the ASGI process).
 
+Reachable without a key, because the health check cannot present one. When
+`TTS_API_KEYS` is set this returns a reduced body (status, readiness, uptime,
+queue depth) and the payload below moves to `GET /v1/admin/health`; with no keys
+it is served here in full. See [section 6](#6-security).
+
 ```json
 {
   "status": "ok",
   "ready": true,
-  "queue": { "pending": 0, "in_flight": 0, "waiting": 0 },
+  "queue": { "pending": 0, "in_flight": 0, "waiting": 0, "capacity": 4,
+             "service_estimate_s": 8.0 },
   "model": {
     "id": "dots-studio/dots.tts-mf",
     "precision": "bfloat16",
@@ -263,19 +269,32 @@ the voice once removes that:
 curl -s -X POST http://127.0.0.1:8000/v1/speakers/register \
   -F "reference_audio=@data/input/reference_clean.wav" \
   -F "reference_text=$(cat data/input/reference_clean.txt)" \
-  -F "speaker_id=riccardo"
+  -F "speaker_id=riccardo" \
+  -F "consent_acknowledged=true" -F "consent_owner=Riccardo" \
+  -F "consent_basis=self-recorded"
 
 # then every request carries ~20 bytes instead of 656 KB
 curl -s -o out.wav -X POST http://127.0.0.1:8000/v1/audio/speech \
   -F "text=Questo non carica alcun audio." -F "speaker_id=riccardo"
 ```
 
-| route | purpose |
-|---|---|
-| `POST /v1/speakers/register` | store a voice, returns its id |
-| `GET /v1/speakers` | list voices with a per-voice reuse counter |
-| `DELETE /v1/speakers/{id}` | forget a voice |
-| `POST /v1/admin/clear-cache` | drop prompt latents + empty the CUDA allocator |
+The three `consent_*` fields record that the person in the clip agreed to being
+cloned. They are optional so existing scripts keep working, and the response
+carries a `consent.status` of `granted`, `not_acknowledged` or `unknown` —
+`unknown` meaning it predates the field, not that it was refused. See
+[section 6](#6-security).
+
+| route | purpose | scope |
+|---|---|---|
+| `POST /v1/speakers/register` | store a voice, returns its id | `speakers` |
+| `GET /v1/speakers` | list voices with a per-voice reuse counter | `speakers` |
+| `DELETE /v1/speakers/{id}` | forget a voice | `speakers` |
+| `POST /v1/admin/clear-cache` | drop prompt latents + empty the CUDA allocator | `admin` |
+| `GET /v1/admin/health` | the full diagnostic payload | `admin` |
+
+Scopes only apply once `TTS_API_KEYS` is set; with no keys the table's last
+column is simply "no restriction". Add `-H "Authorization: Bearer $KEY"` to any
+of them when it is.
 
 `scripts/process_txt.py` does this automatically, and falls back to per-chunk
 upload if the server is older or registration fails.
@@ -408,7 +427,145 @@ is actually being applied.
 
 ---
 
-## 6. Finding the best settings for *your* GPU
+## 6. Security
+
+This service turns any uploaded WAV into speech in that voice. That makes it an
+impersonation tool for anyone who can reach it, so the defaults are: **open on
+`127.0.0.1`, refusing to start on any other address**, with the controls below
+there for when you want it reachable.
+
+### Keys and scopes
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(24))"   # per key
+```
+
+```bash
+# .env
+TTS_API_KEYS="pipeline:<secret>:tts;library:<secret>:speakers;ops:<secret>:admin"
+```
+
+One entry per `;`, shaped `<label>:<secret>:<scope>[|<scope>...]`:
+
+| scope | grants |
+|---|---|
+| `tts` | `POST /v1/audio/speech`, `GET /v1/models` |
+| `speakers` | register, list and delete voices |
+| `admin` | `POST /v1/admin/clear-cache`, `GET /v1/admin/health` |
+| `*` | all of the above |
+
+Present it as `Authorization: Bearer <secret>` or `X-API-Key: <secret>`.
+
+Scopes are separate on purpose: a CI job that only synthesises has no business
+deleting stored voices, and a key that can register a voice should not be able
+to reach the GPU. A key grants its own scopes and nothing else.
+
+Three things are rejected at **startup**, not silently accepted: a secret
+shorter than 16 characters (`TTS_API_KEYS=dev` looks like it works and is not a
+credential), an unknown scope (`:adminn` would otherwise mean "no admin
+access"), and a bare key with no label or scope. Keys are read from the
+environment only — never from `best_config.json`, which is committed.
+
+### What is protected
+
+Everything except `GET /`, `GET /ui` and `GET /health`. Those three have to stay
+open: the Docker health check and any `depends_on: service_healthy` gate have no
+way to present a credential, and a container that cannot be health-checked does
+not restart.
+
+With keys enabled, `/health` also **shrinks** to status, readiness, uptime and a
+queue count. The full telemetry — VRAM, loaded model, last generation — moves
+to `GET /v1/admin/health` behind the `admin` scope, because on a published
+instance that payload tells an anonymous caller what is loaded, how much VRAM is
+free and how busy the GPU is: reconnaissance for the attack the keys prevent.
+With no keys configured the split does not apply and `/health` returns what it
+always did, so a local install sees no change.
+
+### Exposure guard
+
+`docker-compose.yml` passes its `TTS_BIND_HOST` value into the container as
+`TTS_PUBLISH_ADDR`, so **one variable drives both the `ports:` mapping and the
+check**. Setting `TTS_BIND_HOST=0.0.0.0` to reach the service from another
+machine therefore also trips the guard, which refuses to start and exits
+non-zero:
+
+```
+Refusing to publish on 0.0.0.0 with authentication disabled. This service
+clones arbitrary voices, so an unauthenticated instance is an impersonation
+tool. Either set TTS_API_KEYS, or publish on 127.0.0.1, or set
+TTS_ALLOW_REMOTE=true to accept the risk explicitly.
+```
+
+Inside a container uvicorn binds `0.0.0.0` by necessity — that is how a
+published port reaches it — so the guard reads the *host* address, never the
+bind address, and the documented deployment keeps working.
+
+`TTS_ALLOW_REMOTE=true` overrides the refusal. It is there for a deliberate
+setup with a reverse proxy or VPN in front; it is not there to silence a
+warning you have not thought about, and the startup log repeats the warning on
+every start.
+
+### Limits
+
+| variable | default | effect |
+|---|---|---|
+| `TTS_RATE_LIMIT_RPM` | `30` | per key, or per peer address when open; `429` + `Retry-After` |
+| `TTS_MAX_QUEUE_SIZE` | `4` | in flight + waiting; beyond it `503` + `Retry-After` |
+| `TTS_MAX_SPEAKERS` | `50` | registered voices; `409` beyond it |
+| `TTS_MAX_TEXT_CHARS` | `2000` | request text; `413` beyond it |
+| `TTS_MAX_REFERENCE_SECONDS` | `20.0` | reference clip length |
+| `TTS_MAX_AUDIO_SECONDS` | `20.0` | generated audio length |
+
+The `Retry-After` on a full queue is the **measured** generation time — an EWMA
+that replaces its startup estimate as soon as there is a real observation — so
+the number quoted is one the client can actually trust. The text cap is set
+above what `scripts/process_txt.py` ever sends (35 words), so the long-form
+pipeline cannot trip it, while a client pasting a chapter gets a clear `413`
+instead of a generation that overruns the 20.5 s patch budget and OOMs.
+
+### Behind a reverse proxy
+
+Terminate TLS and pass the key through:
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:8000;
+    proxy_set_header X-API-Key $http_x_api_key;   # or Authorization
+    proxy_read_timeout 900s;                      # a long chunk can take minutes
+}
+```
+
+The service reads the peer address for rate limiting, so **every request will
+look like the proxy** and share its budget. That is inherent to running behind
+a proxy, and it is why `TTS_MAX_SPEAKERS` and the queue cap are not rate
+limits: they are per-process state and hold regardless.
+
+### Errors and request IDs
+
+Every refusal uses one envelope, so a client parses one shape:
+
+```json
+{"error": {"code": "RATE_LIMITED", "message": "...", "retryable": true,
+           "request_id": "9f2a7c41d0e5b8a2c3d4e5f60718293a", "retry_after": 12}}
+```
+
+`retryable` is the field to branch on: a client that blindly retries a `400` has
+a bug, and one that never retries stalls its own queue. `Retry-After` is also
+sent as a header. Every response carries `X-Request-ID`; a client-supplied one
+is echoed if it is a plain token, and replaced otherwise, so a caller cannot
+forge a line in your log.
+
+### Consent
+
+`POST /v1/speakers/register` accepts `consent_acknowledged`, `consent_owner` and
+`consent_basis`, and returns them as a `consent` object with a `status` of
+`granted`, `not_acknowledged` or `unknown`. `unknown` is not `false` — it means
+the voice was registered before this existed, and those sidecars still load, so
+upgrading never orphans a recording. Send `consent_acknowledged=true` for voices
+you have permission to clone; the timestamp is re-stamped on overwrite so it
+always describes the audio currently on disk.
+
+## 7. Finding the best settings for *your* GPU
 
 `scripts/autotune.py` sweeps the runtime settings, measures each candidate
 with the real benchmark, and writes the winning configuration out.
@@ -642,7 +799,7 @@ handle it downstream.
 
 ---
 
-## 7. Operational notes
+## 8. Operational notes
 
 * **The first request after a restart is 2-3x the steady cost, not 20x.** It
   used to look far worse (RTF 3.3-8.7) because the warmup compiles a 10.5 s
@@ -755,7 +912,7 @@ handle it downstream.
 
 ---
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 | symptom | fix |
 |---|---|
@@ -775,7 +932,7 @@ handle it downstream.
 
 ---
 
-## 9. License
+## 10. License
 
 **Non-commercial use only.** Use, copy, modification and distribution are allowed
 for non-commercial purposes; commercial use needs prior written permission from

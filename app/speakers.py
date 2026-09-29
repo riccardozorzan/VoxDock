@@ -40,9 +40,41 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _optional_bool(value: Any) -> Optional[bool]:
+    """Read a consent flag that may be absent, and must not be guessed.
+
+    ``None`` (unknown) is preserved rather than coerced to ``False``: "we never
+    asked" and "we were told no" are different answers, and collapsing them
+    would make a registry that predates consent look like a registry of
+    unconsented voices.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalised = value.strip().lower()
+        if normalised in {"1", "true", "yes", "y", "on"}:
+            return True
+        if normalised in {"0", "false", "no", "n", "off"}:
+            return False
+    return None
+
+
 @dataclass
 class SpeakerRecord:
-    """One registered voice."""
+    """One registered voice.
+
+    The ``consent_*`` fields exist because a voice clone is a likeness, not a
+    file. Recording who acknowledged that, and when, means the registry can
+    later answer "do we have permission for this voice?" - which is the first
+    question anyone should have to ask before using a stored clip, and the one
+    an abuse report will ask.
+
+    They are stored per registration rather than in a separate consent ledger
+    because a ledger is a second thing to keep consistent with the data it
+    governs; here the answer is in the same file as the voice.
+    """
 
     id: str
     audio_path: str
@@ -52,9 +84,47 @@ class SpeakerRecord:
     audio_filename: str
     created: str
     requests: int = 0
+    #: ``None`` on records written before consent was tracked, which is *not* the
+    #: same as ``False``. ``None`` means "unknown"; the difference matters when
+    #: someone asks whether a specific clip was registered with consent.
+    consent_acknowledged: Optional[bool] = None
+    consent_at: str = ""
+    #: Free text: who owns the voice, and on what basis it may be used.
+    consent_owner: str = ""
+    consent_basis: str = ""
 
     def as_dict(self) -> dict[str, Any]:
+        """The flat form written to the sidecar.
+
+        Used for persistence, so it stays exactly the set of stored fields -
+        no derived keys, or the JSON on disk and the dataclass drift apart.
+        """
         return asdict(self)
+
+    def as_api_dict(self) -> dict[str, Any]:
+        """The API form, with the consent answer as one nested object.
+
+        Nested so a client does not have to know that ``null`` (never asked)
+        and ``false`` (asked, refused) are different states - the distinction
+        the whole field exists to preserve.
+        """
+        return {
+            **self.as_dict(),
+            "consent": {
+                "status": self.consent_status,
+                "acknowledged": self.consent_acknowledged,
+                "recorded_at": self.consent_at,
+                "owner": self.consent_owner,
+                "basis": self.consent_basis,
+            },
+        }
+
+    @property
+    def consent_status(self) -> str:
+        """``granted`` / ``not_acknowledged`` / ``unknown`` for the API and UI."""
+        if self.consent_acknowledged is None:
+            return "unknown"
+        return "granted" if self.consent_acknowledged else "not_acknowledged"
 
 
 class SpeakerRegistry:
@@ -102,6 +172,9 @@ class SpeakerRegistry:
         audio_filename: str,
         reference_text: str,
         overwrite: bool = False,
+        consent_acknowledged: Optional[bool] = None,
+        consent_owner: str = "",
+        consent_basis: str = "",
     ) -> SpeakerRecord:
         """Persist a voice. Raises ``ValueError`` on bad input or a name clash."""
         if not audio_bytes:
@@ -134,6 +207,13 @@ class SpeakerRegistry:
             audio_bytes=len(audio_bytes),
             audio_filename=audio_filename or "reference.wav",
             created=_now(),
+            # Recorded on *every* write, including an overwrite, so the timestamp
+            # always describes the audio currently on disk rather than whatever
+            # was registered first under that id.
+            consent_acknowledged=consent_acknowledged,
+            consent_at=_now() if consent_acknowledged else "",
+            consent_owner=(consent_owner or "").strip(),
+            consent_basis=(consent_basis or "").strip(),
         )
         self._write_meta(record)
         logger.info("Registered speaker %s (%d bytes)", identifier, len(audio_bytes))
@@ -188,6 +268,13 @@ class SpeakerRegistry:
             audio_filename=str(payload.get("audio_filename") or "reference.wav"),
             created=str(payload.get("created") or ""),
             requests=int(payload.get("requests") or 0),
+            # Sidecars written before consent tracking have no such key, and
+            # they must keep loading: a missing field is "unknown", never
+            # "refused", or upgrading the service would orphan real voices.
+            consent_acknowledged=_optional_bool(payload.get("consent_acknowledged")),
+            consent_at=str(payload.get("consent_at") or ""),
+            consent_owner=str(payload.get("consent_owner") or ""),
+            consent_basis=str(payload.get("consent_basis") or ""),
         )
         # A clip deleted behind our back must not resolve as usable.
         if not audio_path.exists():

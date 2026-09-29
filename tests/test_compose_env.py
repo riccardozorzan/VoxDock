@@ -53,23 +53,45 @@ HOST_ONLY = {
     ),
 }
 
-#: ``VAR: ${VAR:-default}`` inside the ``environment:`` block.
-_ENTRY = re.compile(r'^\s+(TTS_[A-Z_]+):\s*"?\$\{\1:-([^}"]*)\}', re.M)
+#: ``VAR: ${VAR:-default}`` inside the ``environment:`` block. The *source* is
+#: captured separately from the key, because one entry is deliberately fed by a
+#: different variable - see ``ALIASED``.
+_ENTRY = re.compile(r'^\s+(TTS_[A-Z_]+):\s*"?\$\{([A-Z_]+):-([^}"]*)\}', re.M)
 _ENVIRONMENT_BLOCK = re.compile(r"\n    environment:\n(.*?)\n    volumes:", re.S)
 #: Variables ``app/config.py`` reads, i.e. every quoted ``TTS_*`` it hands to a
 #: ``_str``/``_int``/``_float``/``_bool`` helper.
 _READ = re.compile(r'"(TTS_[A-Z_]+)"')
+
+#: Forwarded variables that take their value from a *different* variable, with
+#: the source and the reason. One entry, and the reason is the whole point:
+#: ``TTS_PUBLISH_ADDR`` is what ``app/security.py`` checks to decide whether to
+#: refuse to start, so it has to be fed by the very variable that decides which
+#: host address compose publishes. Letting an operator set the two separately
+#: would mean they could publish on 0.0.0.0 and leave the guard reading
+#: 127.0.0.1 - a security control that can be defeated by the same edit that
+#: creates the exposure it exists to prevent.
+ALIASED = {
+    "TTS_PUBLISH_ADDR": (
+        "TTS_BIND_HOST",
+        "the guard must read the address compose actually publishes",
+    ),
+}
 
 
 def compose_text() -> str:
     return COMPOSE_FILE.read_text(encoding="utf-8")
 
 
-def forwarded_vars(text: str) -> dict[str, str]:
-    """``{VAR: default}`` for every forwarded ``TTS_*`` in the environment block."""
+def forwarded_entries(text: str) -> dict[str, tuple[str, str]]:
+    """``{VAR: (source, default)}`` for every ``TTS_*`` in the environment block."""
     block = _ENVIRONMENT_BLOCK.search(text)
     assert block is not None, "docker-compose.yml: no environment block found"
-    return dict(_ENTRY.findall(block.group(1)))
+    return {key: (source, default) for key, source, default in _ENTRY.findall(block.group(1))}
+
+
+def forwarded_vars(text: str) -> dict[str, str]:
+    """``{VAR: default}`` for every forwarded ``TTS_*`` in the environment block."""
+    return {key: default for key, (_, default) in forwarded_entries(text).items()}
 
 
 def app_read_vars() -> set[str]:
@@ -191,3 +213,59 @@ def test_a_planted_gap_is_detected():
 def test_host_only_list_documents_the_awkward_ones(var):
     """Removing something from the block is only OK when HOST_ONLY says why."""
     assert var in HOST_ONLY
+
+
+# --------------------------------------------------------------------------- #
+#  The exposure guard has to be wired to the address compose actually publishes
+# --------------------------------------------------------------------------- #
+def test_the_guarded_address_is_the_published_address():
+    """One variable must drive both the port mapping and the startup guard.
+
+    ``app/security.py`` refuses to start when the published address is remote
+    and no API keys are configured. That check is only worth anything if it
+    reads the *same* address compose binds the port to. Two variables would
+    let the exposure and the guard drift apart, and the guard would be defeated
+    by the same edit that created the exposure.
+    """
+    text = compose_text()
+    entries = forwarded_entries(text)
+
+    for var, (source, _) in ALIASED.items():
+        assert var in entries, f"{var} is not forwarded into the container at all"
+        actual = entries[var][0]
+        assert actual == source, (
+            f"{var} is fed by {actual!r}, expected {source!r}. The startup guard "
+            "in app/security.py reads this variable; if it no longer mirrors the "
+            "address compose publishes, the guard is checking the wrong address."
+        )
+
+
+def test_the_published_address_appears_in_the_port_mapping():
+    """And the source variable is what ``ports:`` uses, not something else."""
+    text = compose_text()
+    ports = re.search(r"\n    ports:\n(.*?)\n\n", text, re.S)
+    assert ports is not None, "docker-compose.yml: no ports block found"
+
+    mapping = ports.group(1)
+    for _, (source, _) in ALIASED.items():
+        assert f"${{{source}" in mapping, (
+            f"the port mapping does not interpolate {source}, so the guard's "
+            "source variable and the published address have come apart"
+        )
+
+
+def test_no_undocumented_alias():
+    """Every non-self-referencing forward has to be justified in ``ALIASED``."""
+    entries = forwarded_entries(compose_text())
+
+    undeclared = {
+        key: source
+        for key, (source, _) in entries.items()
+        if source != key and key not in ALIASED
+    }
+
+    assert undeclared == {}, (
+        f"compose forwards these from a different variable with no documented "
+        f"reason: {undeclared}. Add them to ALIASED, or make them "
+        f"self-referencing."
+    )

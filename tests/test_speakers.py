@@ -234,3 +234,133 @@ def test_delete_cannot_remove_a_file_outside_the_root(registry, tmp_path, bad_id
     registry.delete(bad_id)  # the return value is False; the point is the file
 
     assert victim.exists(), "delete() escaped the speakers directory"
+
+
+# --------------------------------------------------------------------------- #
+#  Consent metadata
+#
+#  A voice clone is a likeness, not a file, so "may we use this recording?" has
+#  to be answerable after the fact. These tests pin the distinction the field
+#  exists for: unknown is not the same as refused.
+# --------------------------------------------------------------------------- #
+def register_with_consent(registry, speaker_id="voice", **consent):
+    return registry.register(
+        speaker_id=speaker_id,
+        audio_bytes=WAV,
+        audio_filename="reference.wav",
+        reference_text=TEXT,
+        **consent,
+    )
+
+
+def test_consent_is_acknowledged_and_timestamped(registry):
+    record = register_with_consent(registry, consent_acknowledged=True)
+
+    assert record.consent_acknowledged is True
+    assert record.consent_status == "granted"
+    assert record.consent_at, "the moment it was acknowledged must be recorded"
+
+
+def test_no_timestamp_is_stamped_without_an_acknowledgement(registry):
+    """A timestamp next to ``false`` would imply consent that was not given."""
+    record = register_with_consent(registry, consent_acknowledged=False)
+
+    assert record.consent_at == ""
+    assert record.consent_status == "not_acknowledged"
+
+
+def test_an_omitted_acknowledgement_is_unknown_not_false(registry):
+    record = register_with_consent(registry)
+
+    assert record.consent_acknowledged is None
+    assert record.consent_status == "unknown"
+
+
+def test_owner_and_basis_are_stored(registry):
+    record = register_with_consent(
+        registry, consent_acknowledged=True,
+        consent_owner="Ada Lovelace", consent_basis="signed release",
+    )
+
+    assert record.consent_owner == "Ada Lovelace"
+    assert record.consent_basis == "signed release"
+
+
+def test_consent_is_trimmed(registry):
+    record = register_with_consent(registry, consent_owner="  Ada  ")
+
+    assert record.consent_owner == "Ada"
+
+
+def test_consent_survives_a_reload(registry):
+    register_with_consent(registry, consent_acknowledged=True, consent_owner="Grace")
+
+    assert registry.get("voice").consent_owner == "Grace"
+
+
+def test_a_sidecar_without_consent_fields_still_loads(registry):
+    """Upgrading must not orphan voices registered before this existed."""
+    register_with_consent(registry, consent_acknowledged=True)
+    meta = registry.root / "voice.json"
+    payload = json.loads(meta.read_text(encoding="utf-8"))
+    for field in ("consent_acknowledged", "consent_at", "consent_owner", "consent_basis"):
+        payload.pop(field, None)
+    meta.write_text(json.dumps(payload), encoding="utf-8")
+
+    record = registry.get("voice")
+
+    assert record is not None, "a pre-consent sidecar must still resolve"
+    assert record.consent_acknowledged is None
+    assert record.consent_status == "unknown"
+
+
+def test_a_string_boolean_in_a_sidecar_is_read(registry):
+    """The sidecar is a file in a bind mount, so it is not fully trusted."""
+    register_with_consent(registry)
+    meta = registry.root / "voice.json"
+    payload = json.loads(meta.read_text(encoding="utf-8"))
+    payload["consent_acknowledged"] = "true"
+    meta.write_text(json.dumps(payload), encoding="utf-8")
+
+    assert registry.get("voice").consent_acknowledged is True
+
+
+def test_a_nonsense_boolean_reads_as_unknown(registry):
+    """Never coerce junk into consent."""
+    register_with_consent(registry)
+    meta = registry.root / "voice.json"
+    payload = json.loads(meta.read_text(encoding="utf-8"))
+    payload["consent_acknowledged"] = "maybe"
+    meta.write_text(json.dumps(payload), encoding="utf-8")
+
+    assert registry.get("voice").consent_acknowledged is None
+
+
+def test_the_api_form_nests_consent_and_the_stored_form_stays_flat(registry):
+    """Two shapes, on purpose: one for disk, one for clients."""
+    register_with_consent(registry, consent_acknowledged=True, consent_owner="Ada")
+
+    record = registry.get("voice")
+
+    assert record.consent_status == "granted"
+    api = record.as_api_dict()
+    assert api["consent"] == {
+        "status": "granted",
+        "acknowledged": True,
+        "recorded_at": api["consent_at"],
+        "owner": "Ada",
+        "basis": "",
+    }
+    # The sidecar stays the flat set of stored fields, with no derived key.
+    stored = json.loads((registry.root / "voice.json").read_text(encoding="utf-8"))
+    assert "consent" not in stored
+
+
+def test_overwriting_refreshes_the_consent_record(registry):
+    register_with_consent(registry, consent_acknowledged=True, consent_owner="first")
+    second = register_with_consent(
+        registry, consent_acknowledged=True, consent_owner="second", overwrite=True
+    )
+
+    assert second.consent_owner == "second"
+    assert registry.get("voice").consent_owner == "second"

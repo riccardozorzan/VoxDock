@@ -22,11 +22,28 @@ from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import LOG_NAMESPACE, __version__
 from app.config import best_config, settings
+from app.security import (
+    SCOPE_ADMIN,
+    SCOPE_SPEAKERS,
+    SCOPE_TTS,
+    ApiError,
+    QueueGate,
+    RateLimiter,
+    client_principal,
+    error_body,
+    evaluate_exposure,
+    extract_credential,
+    new_request_id,
+    sanitise_request_id,
+    verify_key,
+)
 from app.speakers import SpeakerRegistry
 from app.utils import (
     clear_cuda_cache,
@@ -141,10 +158,53 @@ def load_runtime() -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 #  Application lifespan
 # --------------------------------------------------------------------------- #
+def _enforce_exposure() -> None:
+    """Refuse to start if this configuration would publish an open voice cloner.
+
+    Called from the lifespan, before the checkpoint loads. Raises
+    ``RuntimeError`` so the container exits non-zero and ``restart:
+    unless-stopped`` makes the failure *visible* rather than silently retrying
+    an insecure configuration forever - a crash loop is a better outcome than a
+    service quietly listening on 0.0.0.0.
+    """
+    sec = settings.security
+    verdict = evaluate_exposure(
+        sec.publish_addr,
+        auth_enabled=sec.auth_enabled,
+        allow_remote=sec.allow_remote,
+        bind_host=settings.api.host,
+        in_container=sec.in_container,
+    )
+    if verdict.fatal:
+        raise RuntimeError(verdict.fatal)
+    if verdict.warning:
+        logger.warning("%s", verdict.warning)
+    if sec.auth_enabled:
+        logger.info(
+            "Authentication enabled: %d API key(s) loaded (%s).",
+            len(sec.api_keys),
+            ", ".join(f"{k.label}={'+'.join(sorted(k.scopes))}" for k in sec.api_keys),
+        )
+    else:
+        logger.info(
+            "No API keys configured (TTS_API_KEYS unset) - the API is open to "
+            "anything that can reach %s.",
+            sec.publish_addr,
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Load the checkpoint once, keep it resident, release it on shutdown."""
+    """Load the checkpoint once, keep it resident, release it on shutdown.
+
+    The exposure guard runs *first*, before the 4.4 GB checkpoint is loaded and
+    before the port is accepting anything. Refusing here costs a second;
+    refusing after the model is resident costs a minute of the operator's time
+    and leaves a brief window where the service is reachable.
+    """
     settings.paths.ensure()
+    _enforce_exposure()
+
     app.state.runtime = None
     app.state.runtime_info = None
     app.state.model_error = None
@@ -153,11 +213,14 @@ async def lifespan(app: FastAPI):
     app.state.last_generation = None
     app.state.lifetime_peak_vram_mb = None
     app.state.request_count = 0
-    # Queue telemetry: one 6 GB GPU runs one generation at a time, so "is it busy
-    # or is it backed up?" is an operational question with no visible answer until
-    # a client times out. See _generation_slot().
-    app.state.pending_requests = 0
-    app.state.in_flight = 0
+    # Bounded admission in front of the lock, and the per-key rate limiter.
+    # Both are per-process state on purpose: one uvicorn worker, one GPU, and a
+    # shared counter across workers would be a shared counter that lies.
+    app.state.queue_gate = QueueGate(max_queue=settings.security.max_queue_size)
+    app.state.rate_limiter = RateLimiter(
+        limit=settings.security.rate_limit_rpm,
+        window_s=settings.security.rate_limit_window_s,
+    )
     app.state.speakers = SpeakerRegistry(settings.paths.speakers_dir)
     logger.info(
         "Registered speakers on disk: %d",
@@ -194,6 +257,217 @@ app = FastAPI(
     description=settings.api.description,
     lifespan=lifespan,
 )
+
+# --------------------------------------------------------------------------- #
+#  Request identity, authentication and structured errors
+#
+#  Everything below is a thin adapter: the rules live in app/security.py, which
+#  imports neither torch nor FastAPI and is therefore tested on the host. This
+#  layer only translates HTTP into those calls and back.
+# --------------------------------------------------------------------------- #
+
+#: Endpoints reachable without a key, whatever else is protected. ``/health``
+#: is here because the Docker health check and any ``depends_on:
+#: service_healthy`` gate have no way to present a credential - and a container
+#: that cannot be health-checked is a container that does not restart. Its
+#: detailed diagnostics are admin-only; see ``/v1/admin/health``.
+PUBLIC_PATHS = frozenset({"/", "/ui", settings.api.health_path, "/openapi.json"})
+
+
+def _request_id(request: Request) -> str:
+    """The id for this request, taken from the state the middleware set."""
+    return getattr(request.state, "request_id", "") or new_request_id()
+
+
+def _error(request: Request, error: ApiError) -> JSONResponse:
+    """Render an :class:`ApiError` as the documented error envelope."""
+    response = JSONResponse(
+        status_code=error.status, content=error_body(error, _request_id(request))
+    )
+    if error.retry_after is not None:
+        # The header form, because that is what a generic HTTP client reads.
+        # Seconds, rounded up: telling a client to retry in 0.4 s produces an
+        # immediate second failure.
+        response.headers["Retry-After"] = str(max(1, int(error.retry_after)))
+    return response
+
+
+def _refusal(request: Request, error: ApiError, auth_label: str = "") -> JSONResponse:
+    """Log a refusal, then render it.
+
+    Every 401/403/429 goes through here so a flood is attributable in the log
+    to a key label or a peer address. The presented secret is never logged.
+    """
+    logger.warning(
+        "refused %s %s -> %s %s (principal=%s)",
+        request.method,
+        request.url.path,
+        error.status,
+        error.code,
+        auth_label or request.client.host if request.client else "-",
+    )
+    return _error(request, error)
+
+
+def require_scope(scope: str):
+    """Build a FastAPI dependency that demands one scope.
+
+    Returns the dependency rather than being one, because the scope is what
+    varies per route; the rest - header extraction, constant-time comparison,
+    the rate-limit principal - is identical for all of them and lives here.
+    """
+
+    def _dependency(
+        request: Request,
+        authorization: Optional[str] = Header(None),
+        x_api_key: Optional[str] = Header(None),
+    ) -> Any:
+        if request.url.path in PUBLIC_PATHS:
+            return None
+        sec = settings.security
+        presented = extract_credential(authorization, x_api_key)
+        auth = verify_key(presented, sec.api_keys, scope)
+
+        if not auth.ok:
+            raise _Refused(
+                _refusal(
+                    request,
+                    ApiError(
+                        401 if auth.reason == "invalid" else 403,
+                        "UNAUTHORIZED"
+                        if auth.reason == "invalid"
+                        else "FORBIDDEN",
+                        auth.message
+                        or f"this endpoint requires the {scope!r} scope",
+                    ),
+                    auth.label or "",
+                )
+            )
+
+        if sec.rate_limit_rpm > 0:
+            client = request.client
+            decision = request.app.state.rate_limiter.check(
+                client_principal(auth, client.host if client else None)
+            )
+            if not decision.allowed:
+                raise _Refused(
+                    _refusal(
+                        request,
+                        ApiError(
+                            429,
+                            "RATE_LIMITED",
+                            (
+                                f"rate limit of {decision.limit} requests per "
+                                f"{sec.rate_limit_window_s:g}s exceeded"
+                            ),
+                            retry_after=decision.retry_after,
+                        ),
+                        auth.label or "",
+                    )
+                )
+            request.state.rate_remaining = decision.remaining
+        request.state.auth_label = auth.label
+        return auth
+
+    return _dependency
+
+
+class _Refused(Exception):
+    """Carries a rendered refusal through to the exception handler.
+
+    Raising an :class:`HTTPException` would be the obvious way to do this, but
+    that produces FastAPI's ``{"detail": ...}`` body, and the documented
+    envelope has to be identical for a 401, a 429 and a 503 - otherwise a
+    client has to special-case every refusal. The handler below catches this and
+    emits the ``{"error": {...}}`` shape, so one envelope covers all of them.
+    """
+
+    def __init__(self, response: JSONResponse) -> None:
+        super().__init__("refused")
+        self.response = response
+
+@app.middleware("http")
+async def _request_context(request: Request, call_next):
+    """Give every request an id, and echo it back on every response.
+
+    The id is what makes a refusal actionable: it appears in the log line, in
+    the error body and in the ``X-Request-ID`` header, so a user can quote it
+    and the operator can find the request without trawling the log. A
+    client-supplied one is honoured when it is boring enough to be safe - see
+    ``sanitise_request_id`` for why that check exists.
+    """
+    request.state.request_id = sanitise_request_id(request.headers.get("X-Request-ID"))
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request.state.request_id
+    return response
+
+
+@app.exception_handler(_Refused)
+async def _refused_handler(request: Request, exc: _Refused) -> JSONResponse:
+    """Refusals already carry their rendered envelope and ``Retry-After``."""
+    response = exc.response
+    response.headers["X-Request-ID"] = _request_id(request)
+    return response
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_error_handler(
+    request: Request, exc: StarletteHTTPException
+) -> JSONResponse:
+    """Re-shape FastAPI's ``{"detail": ...}`` into the documented envelope.
+
+    Registered against Starlette's class, not FastAPI's, and that detail is
+    load-bearing: FastAPI's is a *subclass* of it, so this one handler covers
+    every ``HTTPException`` the routes raise **and** the 404/405 that Starlette
+    itself produces for an unknown path or method. Registering only the
+    FastAPI class leaves a plain ``GET /typo`` answering in the old shape,
+    which is how a client ends up parsing two different error formats.
+
+    The status code and the message are preserved exactly; only the wrapper
+    changes. ``detail`` is sometimes already a dict (the out-of-memory path in
+    ``create_speech``), so it is passed through as the message rather than
+    stringified into ``"{'error': 'out_of_memory'}"``.
+    """
+    detail = exc.detail
+    message = detail if isinstance(detail, str) else str(detail)
+    code = {400: "BAD_REQUEST", 401: "UNAUTHORIZED", 403: "FORBIDDEN",
+            404: "NOT_FOUND", 405: "METHOD_NOT_ALLOWED",
+            413: "PAYLOAD_TOO_LARGE", 429: "RATE_LIMITED",
+            500: "INTERNAL_ERROR", 503: "ENGINE_BUSY"}.get(exc.status_code, "ERROR")
+    return _error(request, ApiError(exc.status_code, code, message))
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    """A malformed form is a 422, but still in the documented shape.
+
+    The framework's own body lists every field error, which is useful, so its
+    ``detail`` is kept verbatim under ``message`` rather than being flattened
+    into prose the client cannot act on.
+    """
+    return _error(
+        request,
+        ApiError(422, "INVALID_REQUEST", str(exc.errors()[:5]), retryable=False),
+    )
+
+
+@app.exception_handler(Exception)
+async def _unhandled_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Last resort: never leak a traceback to the caller.
+
+    The traceback goes to the log with the request id; the client gets a
+    message that tells it to quote that id. Echoing ``str(exc)`` here would put
+    file paths and occasionally configuration values into a response body,
+    which is how internal details end up in a bug report pasted into a public
+    issue tracker.
+    """
+    logger.exception("unhandled error (request_id=%s)", _request_id(request))
+    return _error(
+        request,
+        ApiError(500, "INTERNAL_ERROR", "internal error; quote the request id", True),
+    )
 
 # --------------------------------------------------------------------------- #
 #  Shared payload builders
@@ -347,14 +621,8 @@ async def ui() -> FileResponse:
     return FileResponse(UI_INDEX, media_type="text/html")
 
 
-@app.get(settings.api.health_path)
-async def health(request: Request) -> JSONResponse:
-    """GPU name, total/allocated/free VRAM (MB) and model readiness.
-
-    Returns HTTP 503 while the checkpoint is still loading so that the Docker
-    health check (and any ``depends_on: service_healthy`` gate) waits for the
-    engine instead of the bare ASGI process.
-    """
+def _health_body(request: Request) -> dict[str, Any]:
+    """The full diagnostic payload, shared by both health routes."""
     state = request.app.state
     runtime = getattr(state, "runtime", None)
     gpu = gpu_snapshot()
@@ -380,14 +648,9 @@ async def health(request: Request) -> JSONResponse:
         "timestamp": now_iso(),
         "uptime_seconds": round(time.time() - state.started_at, 3),
         "request_count": state.request_count,
-        # Queue telemetry: `pending` counts every request that has reached the
-        # synthesis path, `in_flight` the one holding the GPU, so
-        # `waiting = pending - in_flight` is the actual backlog.
-        "queue": {
-            "pending": state.pending_requests,
-            "in_flight": state.in_flight,
-            "waiting": max(0, state.pending_requests - state.in_flight),
-        },
+        # Queue telemetry straight from the admission gate, so it cannot report
+        # a backlog the gate is not actually enforcing.
+        "queue": state.queue_gate.snapshot(),
         "device": settings.model.device,
         "model": model,
         # Which resolution tier produced each setting (v3 Task 3.1). Makes it
@@ -421,9 +684,66 @@ async def health(request: Request) -> JSONResponse:
             "error": gpu.get("error"),
         },
     }
-    return JSONResponse(status_code=200 if runtime is not None else 503, content=body)
+    body["security"] = {
+        # Deliberately reported so an operator can confirm the state of the
+        # control from outside, without reading the startup log.
+        "auth_required": settings.security.auth_enabled,
+        "scopes_required": {
+            "speech": SCOPE_TTS,
+            "speakers": SCOPE_SPEAKERS,
+            "admin": SCOPE_ADMIN,
+        },
+        "publish_addr": settings.security.publish_addr,
+        "rate_limit_rpm": settings.security.rate_limit_rpm,
+        "max_queue_size": settings.security.max_queue_size,
+    }
+    return body
 
-@app.get("/v1/models")
+
+@app.get(settings.api.health_path)
+async def health(request: Request) -> JSONResponse:
+    """Liveness and readiness, safe to expose without a key.
+
+    Returns 503 while the checkpoint is still loading, so the Docker health
+    check (and any ``depends_on: service_healthy`` gate) waits for the engine
+    rather than the bare ASGI process.
+
+    When authentication is enabled this returns only the fields a load balancer
+    needs. The full telemetry - VRAM, the loaded model, the queue, the last
+    generation - moves to ``GET /v1/admin/health``, because on a published
+    instance that payload tells an unauthenticated caller which model is
+    loaded, how much VRAM is free and how busy the GPU is, which is reconnaissance
+    for exactly the attack this P0 work exists to stop. The split is
+    conditional so a local-first install sees no change at all.
+    """
+    body = _health_body(request)
+    ready = bool(body.get("ready"))
+    if settings.security.auth_enabled:
+        public = {
+            "status": body["status"],
+            "ready": ready,
+            "timestamp": body["timestamp"],
+            "uptime_seconds": body["uptime_seconds"],
+            "queue": {"pending": body["queue"]["pending"]},
+        }
+        return JSONResponse(status_code=200 if ready else 503, content=public)
+    return JSONResponse(status_code=200 if ready else 503, content=body)
+
+
+@app.get("/v1/admin/health", dependencies=[Depends(require_scope(SCOPE_ADMIN))])
+async def admin_health(request: Request) -> JSONResponse:
+    """The full diagnostic payload behind the admin scope.
+
+    Same body ``/health`` returns when the service is open locally; available
+    without a key only in that case, so the local-first workflow is unchanged.
+    """
+    body = _health_body(request)
+    return JSONResponse(
+        status_code=200 if body.get("ready") else 503, content=body
+    )
+
+
+@app.get("/v1/models", dependencies=[Depends(require_scope(SCOPE_TTS))])
 async def list_models(request: Request) -> dict[str, Any]:
     return {"object": "list", "data": [_model_payload(request)]}
 
@@ -431,33 +751,61 @@ async def list_models(request: Request) -> dict[str, Any]:
 #  Speaker registry (v3 Task 3.3)
 # --------------------------------------------------------------------------- #
 @asynccontextmanager
-async def _generation_slot(state: Any):
-    """Count this request for ``/health`` while it holds - or waits for - the GPU.
+async def _generation_slot(request: Request, state: Any):
+    """Hold - or wait for - the GPU, with the queue bounded.
 
-    One 6 GB GPU cannot run two generations at once, so the lock is what makes the
-    service correct; it is also the only thing a client can experience as "the
-    server is stuck". ``pending`` is incremented on entry and decremented in a
-    ``finally``, so a request that fails while waiting cannot leak a count.
+    One 6 GB GPU cannot run two generations at once, so the lock is what makes
+    the service correct. The lock alone, though, is an *unbounded* queue: every
+    request that arrives parks on it and eventually runs, so a client that
+    sends 400 gets 399 connections held for the length of a synthesis each,
+    and the burst is delayed rather than rejected. ``QueueGate`` refuses the
+    excess with a 503 and a ``Retry-After`` instead, which the client can act on.
 
-    Used as ``async with _generation_slot(state):`` in place of
-    ``async with state.generation_lock:``, so the route body keeps its shape.
+    The gate is also what ``/health`` reports, so the telemetry cannot drift
+    from what the gate is actually doing - the two used to be separate counters
+    incremented in this function.
+
+    Both counters are decremented in a ``finally``, so a request that fails
+    while waiting - or is cancelled - cannot leak a slot and wedge the queue.
     """
-    state.pending_requests += 1
+    admission = state.queue_gate.admit()
+    if not admission.admitted:
+        raise _Refused(
+            _refusal(
+                request,
+                ApiError(
+                    503,
+                    "QUEUE_FULL",
+                    f"the generation queue is full ({admission.pending} of "
+                    f"{state.queue_gate.max_queue} slots in use). Retry after "
+                    f"about {admission.retry_after:.0f}s.",
+                    retry_after=admission.retry_after,
+                ),
+                getattr(request.state, "auth_label", "") or "",
+            )
+        )
+    started = time.perf_counter()
     try:
         async with state.generation_lock:
-            state.in_flight += 1
+            state.queue_gate.start()
             try:
                 yield
             finally:
-                state.in_flight -= 1
+                state.queue_gate.finish()
     finally:
-        state.pending_requests -= 1
+        # Fed the measured wall time so the next refusal quotes a real number
+        # instead of the startup estimate.
+        state.queue_gate.release(service_seconds=time.perf_counter() - started)
 
 
 def _registry(request: Request) -> SpeakerRegistry:
     return request.app.state.speakers
 
-@app.post("/v1/speakers/register", status_code=201)
+@app.post(
+    "/v1/speakers/register",
+    status_code=201,
+    dependencies=[Depends(require_scope(SCOPE_SPEAKERS))],
+)
 async def register_speaker(
     request: Request,
     reference_audio: UploadFile = File(..., description="Clean 5-15 s reference WAV."),
@@ -468,6 +816,19 @@ async def register_speaker(
         None, description="Reusable name; generated when omitted."
     ),
     overwrite: bool = Form(False, description="Replace an existing speaker_id."),
+    consent_acknowledged: Optional[bool] = Form(
+        None,
+        description=(
+            "Confirm the person in this clip has agreed to being cloned. "
+            "Recorded with the voice; see the 'consent' object in the response."
+        ),
+    ),
+    consent_owner: Optional[str] = Form(
+        None, description="Who owns the voice, if you record it."
+    ),
+    consent_basis: Optional[str] = Form(
+        None, description="On what basis it may be used (contract, self, research)."
+    ),
 ) -> dict[str, Any]:
     """Store a voice once so later requests can reference it by ``speaker_id``.
 
@@ -485,38 +846,118 @@ async def register_speaker(
             detail=f"'reference_audio' exceeds {settings.api.max_upload_mb} MB.",
         )
 
-    record = _registry(request).register(
-        speaker_id=speaker_id,
-        audio_bytes=payload,
-        audio_filename=reference_audio.filename or "reference.wav",
-        reference_text=reference_text,
-        overwrite=overwrite,
-    )
-    data = record.as_dict()
+    registry = _registry(request)
+    _check_speaker_capacity(request, registry, speaker_id, overwrite)
+
+    try:
+        record = registry.register(
+            speaker_id=speaker_id,
+            audio_bytes=payload,
+            audio_filename=reference_audio.filename or "reference.wav",
+            reference_text=reference_text,
+            overwrite=overwrite,
+            consent_acknowledged=consent_acknowledged,
+            consent_owner=consent_owner or "",
+            consent_basis=consent_basis or "",
+        )
+    except ValueError as exc:
+        # The registry validates the id, the audio and the transcript, and
+        # signals every one of them with ValueError. Letting that escape was a
+        # latent 500: a client re-registering a name got a server error for a
+        # client mistake. Split on which message it is, because the two want
+        # different answers - 409 says "pick another name or pass
+        # overwrite=true", 400 says "this input is wrong".
+        message = str(exc)
+        conflict = "already exists" in message
+        raise _Refused(
+            _refusal(
+                request,
+                ApiError(
+                    409 if conflict else 400,
+                    "SPEAKER_EXISTS" if conflict else "INVALID_SPEAKER",
+                    message,
+                    retryable=False,
+                ),
+                getattr(request.state, "auth_label", "") or "",
+            )
+        ) from exc
+    data = record.as_api_dict()
     data["duration_seconds"] = round(wav_duration_seconds(record.audio_path), 3)
+    if record.consent_acknowledged:
+        logger.info(
+            "speaker %s registered with consent acknowledged (owner=%r, basis=%r)",
+            record.id,
+            record.consent_owner or "-",
+            record.consent_basis or "-",
+        )
+    else:
+        logger.warning(
+            "speaker %s registered WITHOUT a consent acknowledgement; it will "
+            "report consent.status=unknown",
+            record.id,
+        )
     return {"object": "speaker", **data}
 
-@app.get("/v1/speakers")
+
+def _check_speaker_capacity(
+    request: Request, registry: SpeakerRegistry, speaker_id: Optional[str], overwrite: bool
+) -> None:
+    """Refuse a registration that would exceed ``TTS_MAX_SPEAKERS``.
+
+    Without a cap, a loop of register calls fills the bind-mounted ``data/``
+    directory, and the service stops for a reason that has nothing to do with
+    the GPU. Overwrites and id collisions do not add a new voice, so they are
+    not counted against the limit.
+    """
+    limit = settings.security.max_speakers
+    if not limit:
+        return
+    # An overwrite of an *existing* id does not add a voice, so it is not
+    # capped. Naming a new one does - otherwise the cap would be trivially
+    # bypassed by passing a speaker_id, which is the obvious first thing
+    # anyone would try.
+    if speaker_id and registry.get(speaker_id.strip()) is not None:
+        return
+    current = len(registry.list())
+    if current >= limit:
+        raise _Refused(
+            _refusal(
+                request,
+                ApiError(
+                    409,
+                    "SPEAKER_LIMIT_REACHED",
+                    f"{current} voices are already registered and the limit is "
+                    f"{limit}. Delete one with DELETE /v1/speakers/{{id}}, or "
+                    "raise TTS_MAX_SPEAKERS.",
+                    retryable=False,
+                ),
+                getattr(request.state, "auth_label", "") or "",
+            )
+        )
+
+@app.get("/v1/speakers", dependencies=[Depends(require_scope(SCOPE_SPEAKERS))])
 async def list_speakers(request: Request) -> dict[str, Any]:
     """Every registered voice, with the number of times each has been reused."""
     records = _registry(request).list()
     return {
         "object": "list",
         "data": [
-            {**record.as_dict(), "duration_seconds": round(
+            {**record.as_api_dict(), "duration_seconds": round(
                 wav_duration_seconds(record.audio_path), 3
             )}
             for record in records
         ],
     }
 
-@app.delete("/v1/speakers/{speaker_id}")
+@app.delete(
+    "/v1/speakers/{speaker_id}", dependencies=[Depends(require_scope(SCOPE_SPEAKERS))]
+)
 async def delete_speaker(request: Request, speaker_id: str) -> dict[str, Any]:
     if not _registry(request).delete(speaker_id):
         raise HTTPException(status_code=404, detail=f"unknown speaker {speaker_id!r}.")
     return {"object": "deleted", "id": speaker_id}
 
-@app.post("/v1/admin/clear-cache")
+@app.post("/v1/admin/clear-cache", dependencies=[Depends(require_scope(SCOPE_ADMIN))])
 async def clear_cache(request: Request) -> dict[str, Any]:
     """Drop prompt latents and free cached CUDA blocks.
 
@@ -540,6 +981,7 @@ async def clear_cache(request: Request) -> dict[str, Any]:
 
 @app.post(
     settings.api.speech_path,
+    dependencies=[Depends(require_scope(SCOPE_TTS))],
     responses={
         200: {
             "content": {"audio/wav": {}},
@@ -583,6 +1025,25 @@ async def create_speech(
     runtime = _require_runtime(request)
 
     cleaned_text = (text or "").strip()
+    max_chars = settings.security.max_text_chars
+    if max_chars and len(cleaned_text) > max_chars:
+        # Refused here rather than deeper in, where the failure is an OOM: the
+        # 128-patch budget at 160 ms is ~20 s of audio, and a text long enough
+        # to blow past it is a client bug worth naming precisely.
+        raise _Refused(
+            _refusal(
+                request,
+                ApiError(
+                    413,
+                    "TEXT_TOO_LONG",
+                    f"'text' is {len(cleaned_text)} characters; the limit is "
+                    f"{max_chars}. Split it into chunks, or run "
+                    "scripts/process_txt.py which sizes them to the VRAM budget.",
+                    retryable=False,
+                ),
+                getattr(request.state, "auth_label", "") or "",
+            )
+        )
     if not cleaned_text:
         # Defence in depth: FastAPI's form validation rejects an empty or
         # whitespace-only `text` before the route body runs, so a client sending
@@ -674,7 +1135,7 @@ async def create_speech(
                 yield staged
 
     with _prompt_source() as prompt_path:
-        async with _generation_slot(state):
+        async with _generation_slot(request, state):
             try:
                 outcome = await asyncio.to_thread(
                     _generate_sync,

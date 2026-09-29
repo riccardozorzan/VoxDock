@@ -100,12 +100,36 @@ services:
       # that trap. The defaults below mirror app/config.py; a test
       # (tests/test_compose_env.py) fails if that ever drifts.
       TTS_API_TITLE: ${TTS_API_TITLE:-VoxDock}
-      TTS_API_VERSION: ${TTS_API_VERSION:-1.0.0}
+      TTS_API_VERSION: ${TTS_API_VERSION:-1.1.0}
       TTS_API_DESCRIPTION: "${TTS_API_DESCRIPTION:-Containerised high-fidelity local TTS service built on dots.tts}"
       TTS_DEVICE: ${TTS_DEVICE:-cuda}
       TTS_MAX_UPLOAD_MB: ${TTS_MAX_UPLOAD_MB:-64}
       TTS_REQUEST_TIMEOUT: ${TTS_REQUEST_TIMEOUT:-900.0}
       TTS_CONNECT_TIMEOUT: ${TTS_CONNECT_TIMEOUT:-10.0}
+
+      # ---- security + abuse limits (TODO P0) ----
+      # Comma-separated scopes, semicolon-separated entries:
+      #   TTS_API_KEYS="ci:<secret>:tts|speakers;ops:<secret>:admin"
+      # Leave empty and the service is open on the published address - which is
+      # the point of the guard below, since 127.0.0.1 is not a network.
+      TTS_API_KEYS: "${TTS_API_KEYS:-}"
+      TTS_ALLOW_BEARER: ${TTS_ALLOW_BEARER:-true}
+      # The HOST address compose publishes, passed in so app/security.py can
+      # check it. Deliberately the same variable as `ports:` above: flipping
+      # TTS_BIND_HOST to 0.0.0.0 to expose the service therefore also trips the
+      # startup guard, instead of quietly publishing an open voice cloner.
+      TTS_PUBLISH_ADDR: ${TTS_BIND_HOST:-127.0.0.1}
+      TTS_ALLOW_REMOTE: ${TTS_ALLOW_REMOTE:-false}
+      TTS_RATE_LIMIT_RPM: ${TTS_RATE_LIMIT_RPM:-30}
+      TTS_RATE_LIMIT_WINDOW_S: ${TTS_RATE_LIMIT_WINDOW_S:-60.0}
+      # 4 = the request in flight plus three waiting. A single 6 GB GPU runs one
+      # generation at a time, so a deeper queue only trades a fast 503 for a
+      # slow timeout on the client.
+      TTS_MAX_QUEUE_SIZE: ${TTS_MAX_QUEUE_SIZE:-4}
+      TTS_MAX_SPEAKERS: ${TTS_MAX_SPEAKERS:-50}
+      TTS_MAX_TEXT_CHARS: ${TTS_MAX_TEXT_CHARS:-2000}
+      TTS_MAX_REFERENCE_SECONDS: ${TTS_MAX_REFERENCE_SECONDS:-20.0}
+      TTS_MAX_AUDIO_SECONDS: ${TTS_MAX_AUDIO_SECONDS:-20.0}
       # Deliberately NOT forwarded - inside the container each of these is either
       # fixed by the image or a footgun, not a knob:
       #   TTS_HOST / TTS_PORT             compose publishes the port; uvicorn binds 0.0.0.0:8000
