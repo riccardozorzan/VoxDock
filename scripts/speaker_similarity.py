@@ -61,9 +61,9 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.utils import now_iso, wav_duration_seconds  # noqa: E402
 
-#: ECAPA-TDNN is the standard lightweight speaker-verification model (~22 MB on
-#: CPU), which keeps this usable on a 6 GB card that is already saturated by
-#: the TTS engine.
+#: ECAPA-TDNN is the standard lightweight speaker-verification model (~22 M
+#: parameters, ~85 MB on disk), which keeps this usable on a 6 GB card that is
+#: already saturated by the TTS engine.
 DEFAULT_MODEL = "speechbrain/spkrec-ecapa-voxceleb"
 TARGET_SAMPLE_RATE = 16_000
 
@@ -80,7 +80,7 @@ class Embedder:
     """Lazily-loaded speaker embedding model.
 
     The model is only instantiated on first use so ``--help`` and argument
-    validation do not pay for a ~22 MB download, and so an import error in
+    validation do not pay for the ~85 MB download, and so an import error in
     ``speechbrain`` surfaces at a useful point rather than at import time.
     """
 
@@ -102,7 +102,7 @@ class Embedder:
                 f"(import failed: {exc})"
             ) from exc
         # CPU by default: the GPU is already saturated by the TTS engine, and
-        # this 22 MB model costs well under a second per clip on CPU.
+        # this 22 M-parameter model costs well under a second per clip on CPU.
         self._model = EncoderClassifier.from_hparams(
             source=self.model_id,
             savedir=os.environ.get("SPEECHBRAIN_CACHE", "/app/data/.speechbrain"),

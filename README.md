@@ -131,7 +131,7 @@ re-downloaded.
 │   ├── latency_report.py      # cold start / first request / steady state
 │   ├── check_identity.py      # assert compose matches app/__init__.py
 │   └── test_api.py            # smoke test; --assert for CI
-├── tests/                     # 109 host-side tests, no GPU needed (~0.1 s)
+├── tests/                     # 117 host-side tests, no GPU needed (~0.1 s)
 │   ├── conftest.py            # fixtures: isolated env, reloadable config
 │   ├── test_config.py         # the three-tier settings chain
 │   ├── test_speakers.py       # registry CRUD + path-traversal defence
@@ -139,7 +139,8 @@ re-downloaded.
 │   ├── test_autotune.py       # the winning-profile artefact
 │   ├── test_patches.py        # the low-VRAM patch guard
 │   ├── test_api_smoke.py      # the --assert smoke test
-│   └── test_ui.py             # /ui asset: endpoints, DOM ids, escaping
+│   ├── test_ui.py             # /ui asset: endpoints, DOM ids, escaping
+│   └── test_identity.py       # compose vs app/Dockerfile identity drift guard
 └── data/
     ├── references/            # raw reference .wav + transcript .txt
     ├── speakers/              # registered voices (id -> .wav + .txt), gitignored
@@ -282,9 +283,11 @@ rather than silently ignored.
    words (`TTS_WORDS_PER_SECOND`, default 2.5).
 
    Consequence: a ~12 s reference leaves ~8 s of generation per call (~20 words);
-   the shipped 7 s `data/input/reference_clean.wav` allows ~13 s of generation per
-   call, which `--max-words auto` reports as ~33 words. `clean_audio.py --trim-to`
-   exists for exactly this reason — remember to shorten the transcript to match.
+   the 7 s `data/input/reference_clean.wav` that `clean_audio.py` writes allows
+   ~13 s of generation per call, which `--max-words auto` reports as ~33 words.
+   `clean_audio.py --trim-to` exists for exactly this reason — remember to
+   shorten the transcript to match. (The WAV is generated locally, not
+   committed: `data/**/*.wav` is gitignored.)
 
 3. **`num_steps` is coupled to the memory budget.** The DiT KV cache is allocated
    as `(num_steps, layers, heads, tokens, dim)`, so every extra sampling step

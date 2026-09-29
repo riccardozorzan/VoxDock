@@ -56,14 +56,6 @@ _TRUTHY = {"1", "true", "t", "yes", "y", "on"}
 _FALSY = {"0", "false", "f", "no", "n", "off", ""}
 
 
-
-
-
-
-
-
-
-
 # --------------------------------------------------------------------------- #
 #  Tuned-profile loader (v3 Task 3.1)
 # --------------------------------------------------------------------------- #
@@ -172,7 +164,6 @@ def _float(name: str, default: float) -> float:
     return default
 
 
-
 # --------------------------------------------------------------------------- #
 #  Settings groups
 # --------------------------------------------------------------------------- #
@@ -261,12 +252,12 @@ class ModelSettings:
     # Measured on an RTX 4050 Laptop (6 GB / 5.64 GiB usable) with the
     # low-VRAM patches enabled and TTS_NUM_STEPS=2:
     #     max_generate_length=128 -> 5.36 GB peak, RTF 0.44   <-- configured here
-    #     max_generate_length=96  -> 5.27 GB peak, RTF 1.15 (eager DiT) / OOM when
-    #                                 the DiT KV cache is sized for more than
-    #                                 2 sampling steps.
+    #     max_generate_length=96  -> 5.27 GB peak, RTF 1.15 (eager DiT)
     # The DiT KV cache is allocated as (num_steps, layers, heads, tokens, dim),
-    # so this budget is coupled to ``default_num_steps``: at 4 steps the cache
-    # doubles and 128 patches no longer fits -- drop this to 96 in that case.
+    # so this budget is coupled to ``default_num_steps``. At 4 steps the cache
+    # doubles, but with the tuned ``vocoder_chunk_patches=32`` 128 patches still
+    # fits (5518 MB peak, measured); drop to 96 only if a longer reference
+    # pushes the peak over ``vram_limit_gb``.
     max_generate_length: int = 128
     # ``max_sequence_length`` sizes the LLM KV cache. The checkpoint default is
     # 2048; halving it to 1024 saves ~170 MB, which is part of what makes the

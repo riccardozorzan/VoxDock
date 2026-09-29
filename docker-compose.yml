@@ -68,7 +68,8 @@ services:
 
       # ---- sampling defaults ----
       # 2 is the MeanFlow default AND sizes the DiT KV cache: at 4 steps the
-      # cache doubles and the 128-patch budget above OOMs. Keep in step with
+      # cache doubles, which still fits the 128-patch budget above (5518 MB peak,
+      # measured, with the tuned TTS_VOCODER_CHUNK_PATCHES=32). Keep in step with
       # app/config.py.
       TTS_NUM_STEPS: ${TTS_NUM_STEPS:-2}
       TTS_GUIDANCE_SCALE: ${TTS_GUIDANCE_SCALE:-1.2}
