@@ -18,7 +18,13 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts.autotune import _variant_comparison, write_best_config  # noqa: E402
+from scripts.autotune import (  # noqa: E402
+    PROJECT_ROOT,
+    Reference,
+    _variant_comparison,
+    repo_relative,
+    write_best_config,
+)
 
 WINNER = {"TTS_MODEL_NAME": "dots-studio/dots.tts-mf", "TTS_NUM_STEPS": "2"}
 ARGS = SimpleNamespace(
@@ -101,3 +107,53 @@ def test_values_are_casted_to_real_types(tmp_path):
     settings = json.loads(out.read_text(encoding="utf-8"))["settings"]
     assert settings["TTS_NUM_STEPS"] == 2
     assert isinstance(settings["TTS_NUM_STEPS"], int)
+
+
+# --------------------------------------------------------------------------- #
+#  Paths in committed reports
+#
+#  tuning_report.json shipped /home/<you>/Documents/projects/products/TTS/... in
+#  a public repository: the operator's username, and the project directory name
+#  from before the rename. The number in that file is still correct evidence; the
+#  path around it is noise that leaks on every future run.
+# --------------------------------------------------------------------------- #
+def test_a_path_inside_the_repo_is_rendered_relative():
+    inside = PROJECT_ROOT / "data" / "input" / "ref_s.wav"
+
+    assert repo_relative(inside) == "data/input/ref_s.wav"
+
+
+def test_a_path_outside_the_repo_stays_absolute(tmp_path):
+    """A clip the reader cannot see needs to say where it is."""
+    outside = tmp_path / "elsewhere.wav"
+
+    assert repo_relative(outside) == str(outside)
+
+
+def test_a_sibling_directory_is_not_mistaken_for_the_project(tmp_path):
+    """``/…/VoxDock-other`` shares a string prefix with ``/…/VoxDock``.
+
+    A ``str.startswith`` check would happily return ``../VoxDock-other/x.wav``
+    here and lose the path entirely; ``Path.is_relative_to`` gets it right.
+    """
+    sibling = PROJECT_ROOT.parent / f"{PROJECT_ROOT.name}-other" / "clip.wav"
+
+    assert repo_relative(sibling) == str(sibling)
+    assert ".." not in repo_relative(sibling)
+
+
+def test_reference_as_dict_is_repo_relative():
+    """The regression itself: as_dict() feeds every committed report."""
+    reference = Reference(
+        name="ref_s",
+        label="1 sentence",
+        audio=PROJECT_ROOT / "data" / "input" / "ref_s.wav",
+        text=PROJECT_ROOT / "data" / "input" / "ref_s.txt",
+        seconds=4.05,
+    )
+
+    payload = reference.as_dict()
+
+    assert payload["audio"] == "data/input/ref_s.wav"
+    assert "/home/" not in json.dumps(payload)
+    assert payload["patches"] == 26

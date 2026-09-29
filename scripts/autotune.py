@@ -295,6 +295,30 @@ class Candidate:
         }
 
 
+def repo_relative(path: "os.PathLike[str] | str") -> str:
+    """Render a path for something that gets committed.
+
+    A tracked report is read on another machine, where an absolute path is worse
+    than useless: it names a home directory and a checkout layout that have
+    nothing to do with the reader. ``tuning_report.json`` shipped
+    ``/home/r3msi/Documents/projects/products/TTS/...`` - the operator's username,
+    and the project directory name from *before* the rename.
+
+    So: repo-relative when the file lives inside the project, absolute otherwise.
+    A clip outside the tree genuinely needs its full path to mean anything, which
+    is the one case where saying where it is beats hiding it.
+
+    Deliberately local to this module rather than in ``app.config``: the tuner
+    imports nothing from ``app`` today, and doing so would make a malformed
+    ``.env`` raise during *its* import - turning the tool you would reach for to
+    diagnose a configuration problem into a casualty of it.
+    """
+    candidate = Path(path)
+    if candidate.is_absolute() and candidate.is_relative_to(PROJECT_ROOT):
+        return str(candidate.relative_to(PROJECT_ROOT))
+    return str(candidate)
+
+
 @dataclass
 class Reference:
     """A reference clip plus the transcript that must match it exactly."""
@@ -313,7 +337,11 @@ class Reference:
         return {
             "name": self.name,
             "label": self.label,
-            "audio": str(self.audio),
+            # Repo-relative on purpose: this dict lands in tuning_report.json and
+            # best_config.json, which are committed, and an absolute path there
+            # bakes the operator's home directory and checkout layout into a
+            # public repository.
+            "audio": repo_relative(self.audio),
             "seconds": round(self.seconds, 2),
             "patches": self.patches,
         }

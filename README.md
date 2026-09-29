@@ -11,6 +11,14 @@ on a laptop RTX 4050 (6 GB). Nothing is installed on the host except Docker.
   with live VRAM telemetry.
 * **Pipeline** — `clean_audio.py` → `process_txt.py` → `benchmark_test.py`.
 
+**What `v1.0.0` is.** The local-first release: a single-user service, published on
+`127.0.0.1` by default, with **no authentication of its own** — the port binding is
+the only thing protecting it. The production gate (authentication, a bounded
+request queue, rate limiting, a pinned model revision, reproducible image builds)
+is tracked separately in `TODO/`, which is deliberately not committed here. What
+this tag *does* claim is measured, and every number below points at the artefact
+it came from.
+
 ---
 
 ## 1. Quick start
@@ -139,7 +147,7 @@ re-downloaded.
 │   ├── test_api.py            # smoke test; --assert for CI
 │   ├── make_reference_set.py  # write the autotuner's reference_set.json
 │   └── fetch_dev_audio.py     # fetch the public ECAPA control clips
-├── tests/                     # 139 host-side tests, no GPU needed (~0.1 s)
+├── tests/                     # 143 host-side tests, no GPU needed (~0.1 s)
 │   ├── conftest.py            # fixtures: isolated env, reloadable config
 │   ├── test_config.py         # the three-tier settings chain
 │   ├── test_speakers.py       # registry CRUD + path-traversal defence

@@ -44,7 +44,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.config import settings  # noqa: E402
-from scripts.autotune import load_reference_seconds  # noqa: E402
+from scripts.autotune import load_reference_seconds, repo_relative  # noqa: E402
 
 #: One latent patch = 160 ms of audio, per the dots.tts AudioVAE config.
 PATCH_SECONDS = 0.16
@@ -62,10 +62,6 @@ def _resolve(value: str) -> Path:
     """Absolute path, relative to the project root when not already absolute."""
     path = Path(value).expanduser()
     return path if path.is_absolute() else (PROJECT_ROOT / path)
-
-
-def _display(path: Path) -> str:
-    return str(path.relative_to(PROJECT_ROOT)) if path.is_relative_to(PROJECT_ROOT) else str(path)
 
 
 def build_entries(
@@ -126,8 +122,8 @@ def build_entries(
             {
                 "name": name,
                 "label": label,
-                "audio": _display(audio),
-                "text": _display(text),
+                "audio": repo_relative(audio),
+                "text": repo_relative(text),
                 "seconds": round(seconds, 2),
                 "patches": patches,
             }
