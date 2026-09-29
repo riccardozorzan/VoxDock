@@ -82,6 +82,25 @@ COPY app ./app
 COPY scripts ./scripts
 RUN mkdir -p /app/data/references /app/data/input /app/data/temp_chunks /app/data/output
 
+# ---- Non-root runtime user -------------------------------------------------
+# The service runs as the host user (see `user:` in docker-compose.yml) so files
+# written into the bind-mounted ./data belong to you rather than to root.
+#
+# The passwd entry is mandatory, not cosmetic: HuggingFace, torch and Python's
+# `getpwuid()` all resolve the uid through /etc/passwd, and without it the
+# checkpoint load dies with "getpwuid(): uid not found: 1000".
+#
+# Deliberately placed LAST so it invalidates only this layer - inserting it
+# earlier would force a ~2 GB re-download of the torch/CUDA wheels.
+ARG VOXDOCK_UID=1000
+ARG VOXDOCK_GID=1000
+RUN groupadd --gid "${VOXDOCK_GID}" voxdock \
+    && useradd --uid "${VOXDOCK_UID}" --gid "${VOXDOCK_GID}" \
+       --create-home --home-dir /home/voxdock --shell /bin/bash voxdock \
+    && mkdir -p /cache /app/data && chmod 1777 /cache \
+    && chown -R "${VOXDOCK_UID}:${VOXDOCK_GID}" /app/data
+ENV HOME=/home/voxdock
+
 # ---- Runtime ---------------------------------------------------------------
 EXPOSE 8000
 

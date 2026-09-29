@@ -22,9 +22,25 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # Must match the `user:` below, so /etc/passwd has a matching entry.
+        VOXDOCK_UID: "${VOXDOCK_UID:-1000}"
+        VOXDOCK_GID: "${VOXDOCK_GID:-1000}"
     image: ${VOXDOCK_IMAGE:-voxdock-tts}:latest
     container_name: ${VOXDOCK_CONTAINER:-voxdock-tts}
     restart: unless-stopped
+
+    # Run as the host user rather than root, so every file the service writes
+    # into the bind-mounted ./data is owned by you. Without this the container
+    # leaves root-owned reports and WAVs behind, which you cannot chown without
+    # sudo. Override with VOXDOCK_UID/VOXDOCK_GID if your host uid differs
+    # (`id -u` / `id -g`).
+    user: "${VOXDOCK_UID:-1000}:${VOXDOCK_GID:-1000}"
+    # The uid above cannot write to /root, so the two caches that used to live
+    # there are re-homed under /cache (a world-writable tmpfs) and /app
+    # respectively. HF_HOME is set for the same reason in the environment block.
+    tmpfs:
+      - /cache:mode=0777
 
     ports:
       - "${TTS_BIND_HOST:-127.0.0.1}:${TTS_PORT:-8000}:8000"
@@ -78,8 +94,12 @@ services:
       # ---- service plumbing ----
       TTS_LOG_LEVEL: ${TTS_LOG_LEVEL:-info}
       TTS_API_URL: ${TTS_API_URL:-http://localhost:8000}
-      HF_HOME: /root/.cache/huggingface
+      HF_HOME: /cache/huggingface
       HF_TOKEN: ${HF_TOKEN:-}
+      # `/root` is not writable by the non-root uid above, so HF_HOME is
+      # re-homed to the tmpfs at /cache. The checkpoint volume is mounted
+      # there instead (see volumes:), which keeps the ~4.4 GB of weights
+      # persistent across rebuilds.
       # NOTE: expandable_segments lets the caching allocator return the ~200 MB
       # of "reserved but unallocated" gaps that appear between the LLM step, the
       # DiT KV cache and the BigVGAN vocoder. This used to be left OFF because
@@ -98,7 +118,7 @@ services:
     volumes:
       # Host project `data/` == container `/app/data` (references, chunks, output)
       - ./data:/app/data
-      - hf_cache:/root/.cache/huggingface
+      - hf_cache:/cache/huggingface
       # Compiled-kernel cache. A named volume, NOT a bind mount: the contents are
       # large, machine-specific and fully regenerable, so they should not land in
       # the working tree.
