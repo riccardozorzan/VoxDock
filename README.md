@@ -1,5 +1,7 @@
 # VoxDock — containerised high-fidelity local TTS
 
+> I needed it, so we made it.
+
 Containerised, GPU-accelerated text-to-speech with **continuation voice cloning**
 on a laptop RTX 4050 (6 GB). Nothing is installed on the host except Docker.
 
