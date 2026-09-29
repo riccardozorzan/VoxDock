@@ -1,19 +1,19 @@
 {
-  "generated": "2026-09-28T21:34:50.478743+00:00",
+  "generated": "2026-09-29T06:08:41.348590+00:00",
   "objective": "balanced",
   "profiles": [
     "short",
     "long"
   ],
   "cost_model": {
-    "fixed_seconds": 0.7881431732383173,
-    "rate_seconds_per_audio": 0.41326499352804563,
-    "points": 34.0
+    "fixed_seconds": 0.5051530674548821,
+    "rate_seconds_per_audio": 0.416878714980744,
+    "points": 32.0
   },
-  "minimum_audio_seconds_for_rtf_target": 9.086794424730483,
+  "minimum_audio_seconds_for_rtf_target": 6.077300986598773,
   "thresholds": {
     "vram_limit_gb": 5.5,
-    "vram_margin_gb": 0.1,
+    "vram_margin_gb": 0.02,
     "rtf_target": 0.5
   },
   "reference": {
@@ -48,8 +48,168 @@
     }
   ],
   "quick_mode": true,
-  "winner": null,
-  "ranking": [],
+  "winner": {
+    "TTS_BIND_HOST": "127.0.0.1",
+    "TTS_PORT": "8000",
+    "TTS_MODEL_NAME": "dots-studio/dots.tts-mf",
+    "TTS_PRECISION": "bfloat16",
+    "TTS_OPTIMIZE": "true",
+    "TTS_WARMUP_ON_OPTIMIZE": "true",
+    "TTS_MAX_GENERATE_LENGTH": "128",
+    "TTS_MAX_SEQUENCE_LENGTH": "1024",
+    "TTS_VOCODER_MERGE_STEPS": "4",
+    "TTS_LOW_VRAM_PATCHES": "true",
+    "TTS_VOCODER_CHUNK_PATCHES": "32",
+    "TTS_NUM_STEPS": "2",
+    "TTS_GUIDANCE_SCALE": "1.2",
+    "TTS_SPEAKER_SCALE": "1.5",
+    "TTS_SEED": "42",
+    "TTS_LANGUAGE": "none",
+    "TTS_NORMALIZE_TEXT": "false",
+    "TTS_VRAM_LIMIT_GB": "5.5",
+    "TTS_RTF_TARGET": "0.5",
+    "TTS_NOISE_PROP_DECREASE": "0.85",
+    "TTS_STATIONARY_NOISE": "true",
+    "TTS_SAMPLE_RATE": "48000",
+    "TTS_REF_MIN_SECONDS": "5",
+    "TTS_REF_MAX_SECONDS": "15",
+    "TTS_CHUNK_MAX_WORDS": "35",
+    "TTS_WORDS_PER_SECOND": "2.5",
+    "TTS_MAX_RETRIES": "3",
+    "TTS_LOG_LEVEL": "info",
+    "TTS_API_URL": "http://localhost:8000",
+    "HF_TOKEN": ""
+  },
+  "ranking": [
+    {
+      "label": "vocoder_chunk_patches=32",
+      "config": {
+        "TTS_BIND_HOST": "127.0.0.1",
+        "TTS_PORT": "8000",
+        "TTS_MODEL_NAME": "dots-studio/dots.tts-mf",
+        "TTS_PRECISION": "bfloat16",
+        "TTS_OPTIMIZE": "true",
+        "TTS_WARMUP_ON_OPTIMIZE": "true",
+        "TTS_MAX_GENERATE_LENGTH": "128",
+        "TTS_MAX_SEQUENCE_LENGTH": "1024",
+        "TTS_VOCODER_MERGE_STEPS": "4",
+        "TTS_LOW_VRAM_PATCHES": "true",
+        "TTS_VOCODER_CHUNK_PATCHES": "32",
+        "TTS_NUM_STEPS": "2",
+        "TTS_GUIDANCE_SCALE": "1.2",
+        "TTS_SPEAKER_SCALE": "1.5",
+        "TTS_SEED": "42",
+        "TTS_LANGUAGE": "none",
+        "TTS_NORMALIZE_TEXT": "false",
+        "TTS_VRAM_LIMIT_GB": "5.5",
+        "TTS_RTF_TARGET": "0.5",
+        "TTS_NOISE_PROP_DECREASE": "0.85",
+        "TTS_STATIONARY_NOISE": "true",
+        "TTS_SAMPLE_RATE": "48000",
+        "TTS_REF_MIN_SECONDS": "5",
+        "TTS_REF_MAX_SECONDS": "15",
+        "TTS_CHUNK_MAX_WORDS": "35",
+        "TTS_WORDS_PER_SECOND": "2.5",
+        "TTS_MAX_RETRIES": "3",
+        "TTS_LOG_LEVEL": "info",
+        "TTS_API_URL": "http://localhost:8000",
+        "HF_TOKEN": ""
+      },
+      "feasible": true,
+      "rejected": "",
+      "skipped": false,
+      "worst_rtf": 0.4809,
+      "mean_rtf": 0.4763,
+      "peak_vram_mb": 5560.0,
+      "peak_vram_gb": 5.43,
+      "usable_audio_seconds": 9.12,
+      "score": 0.44392,
+      "trials": [
+        {
+          "profile": "short",
+          "ok": true,
+          "error": "",
+          "rtf": 0.4809,
+          "peak_vram_mb": 5558.0,
+          "audio_seconds": 3.84,
+          "generation_seconds": 1.847
+        },
+        {
+          "profile": "long",
+          "ok": true,
+          "error": "",
+          "rtf": 0.4718,
+          "peak_vram_mb": 5560.0,
+          "audio_seconds": 9.12,
+          "generation_seconds": 4.303
+        }
+      ]
+    },
+    {
+      "label": "optimize=true",
+      "config": {
+        "TTS_BIND_HOST": "127.0.0.1",
+        "TTS_PORT": "8000",
+        "TTS_MODEL_NAME": "dots-studio/dots.tts-mf",
+        "TTS_PRECISION": "bfloat16",
+        "TTS_OPTIMIZE": "true",
+        "TTS_WARMUP_ON_OPTIMIZE": "true",
+        "TTS_MAX_GENERATE_LENGTH": "128",
+        "TTS_MAX_SEQUENCE_LENGTH": "1024",
+        "TTS_VOCODER_MERGE_STEPS": "4",
+        "TTS_LOW_VRAM_PATCHES": "true",
+        "TTS_VOCODER_CHUNK_PATCHES": "32",
+        "TTS_NUM_STEPS": "2",
+        "TTS_GUIDANCE_SCALE": "1.2",
+        "TTS_SPEAKER_SCALE": "1.5",
+        "TTS_SEED": "42",
+        "TTS_LANGUAGE": "none",
+        "TTS_NORMALIZE_TEXT": "false",
+        "TTS_VRAM_LIMIT_GB": "5.5",
+        "TTS_RTF_TARGET": "0.5",
+        "TTS_NOISE_PROP_DECREASE": "0.85",
+        "TTS_STATIONARY_NOISE": "true",
+        "TTS_SAMPLE_RATE": "48000",
+        "TTS_REF_MIN_SECONDS": "5",
+        "TTS_REF_MAX_SECONDS": "15",
+        "TTS_CHUNK_MAX_WORDS": "35",
+        "TTS_WORDS_PER_SECOND": "2.5",
+        "TTS_MAX_RETRIES": "3",
+        "TTS_LOG_LEVEL": "info",
+        "TTS_API_URL": "http://localhost:8000",
+        "HF_TOKEN": ""
+      },
+      "feasible": true,
+      "rejected": "",
+      "skipped": false,
+      "worst_rtf": 0.4863,
+      "mean_rtf": 0.4769,
+      "peak_vram_mb": 5560.0,
+      "peak_vram_gb": 5.43,
+      "usable_audio_seconds": 9.12,
+      "score": 0.44932,
+      "trials": [
+        {
+          "profile": "short",
+          "ok": true,
+          "error": "",
+          "rtf": 0.4863,
+          "peak_vram_mb": 5560.0,
+          "audio_seconds": 3.68,
+          "generation_seconds": 1.79
+        },
+        {
+          "profile": "long",
+          "ok": true,
+          "error": "",
+          "rtf": 0.4676,
+          "peak_vram_mb": 5560.0,
+          "audio_seconds": 9.12,
+          "generation_seconds": 4.265
+        }
+      ]
+    }
+  ],
   "candidates": [
     {
       "label": "reference=ref_s",
@@ -86,10 +246,10 @@
         "HF_TOKEN": ""
       },
       "feasible": false,
-      "rejected": "worst-profile RTF 0.669 exceeds the target 0.5",
+      "rejected": "worst-profile RTF 0.564 exceeds the target 0.5",
       "skipped": false,
-      "worst_rtf": 0.6686,
-      "mean_rtf": 0.5658,
+      "worst_rtf": 0.5635,
+      "mean_rtf": 0.5144,
       "peak_vram_mb": 5510.0,
       "peak_vram_gb": 5.381,
       "usable_audio_seconds": 16.48,
@@ -99,19 +259,19 @@
           "profile": "short",
           "ok": true,
           "error": "",
-          "rtf": 0.6686,
+          "rtf": 0.5635,
           "peak_vram_mb": 5498.0,
-          "audio_seconds": 3.52,
-          "generation_seconds": 2.353
+          "audio_seconds": 3.36,
+          "generation_seconds": 1.893
         },
         {
           "profile": "long",
           "ok": true,
           "error": "",
-          "rtf": 0.463,
+          "rtf": 0.4653,
           "peak_vram_mb": 5510.0,
           "audio_seconds": 16.48,
-          "generation_seconds": 7.631
+          "generation_seconds": 7.669
         }
       ]
     },
@@ -150,10 +310,10 @@
         "HF_TOKEN": ""
       },
       "feasible": false,
-      "rejected": "worst-profile RTF 0.709 exceeds the target 0.5",
+      "rejected": "worst-profile RTF 0.612 exceeds the target 0.5",
       "skipped": false,
-      "worst_rtf": 0.7087,
-      "mean_rtf": 0.5923,
+      "worst_rtf": 0.6118,
+      "mean_rtf": 0.5263,
       "peak_vram_mb": 5510.0,
       "peak_vram_gb": 5.381,
       "usable_audio_seconds": 13.28,
@@ -163,19 +323,19 @@
           "profile": "short",
           "ok": true,
           "error": "",
-          "rtf": 0.7087,
+          "rtf": 0.6118,
           "peak_vram_mb": 5500.0,
-          "audio_seconds": 3.2,
-          "generation_seconds": 2.268
+          "audio_seconds": 3.36,
+          "generation_seconds": 2.055
         },
         {
           "profile": "long",
           "ok": true,
           "error": "",
-          "rtf": 0.4759,
+          "rtf": 0.4409,
           "peak_vram_mb": 5510.0,
           "audio_seconds": 13.28,
-          "generation_seconds": 6.321
+          "generation_seconds": 5.856
         }
       ]
     },
@@ -214,10 +374,10 @@
         "HF_TOKEN": ""
       },
       "feasible": false,
-      "rejected": "peak 5.43 GB exceeds the 5.40 GB budget (limit 5.5 GB - margin 0.1 GB)",
+      "rejected": "worst-profile RTF 0.571 exceeds the target 0.5",
       "skipped": false,
-      "worst_rtf": 0.6817,
-      "mean_rtf": 0.6003,
+      "worst_rtf": 0.5709,
+      "mean_rtf": 0.5192,
       "peak_vram_mb": 5560.0,
       "peak_vram_gb": 5.43,
       "usable_audio_seconds": 9.12,
@@ -227,19 +387,19 @@
           "profile": "short",
           "ok": true,
           "error": "",
-          "rtf": 0.6817,
+          "rtf": 0.5709,
           "peak_vram_mb": 5560.0,
-          "audio_seconds": 3.68,
-          "generation_seconds": 2.509
+          "audio_seconds": 3.84,
+          "generation_seconds": 2.192
         },
         {
           "profile": "long",
           "ok": true,
           "error": "",
-          "rtf": 0.5189,
+          "rtf": 0.4676,
           "peak_vram_mb": 5560.0,
           "audio_seconds": 9.12,
-          "generation_seconds": 4.732
+          "generation_seconds": 4.265
         }
       ]
     },
@@ -278,10 +438,10 @@
         "HF_TOKEN": ""
       },
       "feasible": false,
-      "rejected": "peak 5.43 GB exceeds the 5.40 GB budget (limit 5.5 GB - margin 0.1 GB)",
+      "rejected": "worst-profile RTF 0.592 exceeds the target 0.5",
       "skipped": false,
-      "worst_rtf": 0.6929,
-      "mean_rtf": 0.6054,
+      "worst_rtf": 0.5924,
+      "mean_rtf": 0.5292,
       "peak_vram_mb": 5560.0,
       "peak_vram_gb": 5.43,
       "usable_audio_seconds": 9.12,
@@ -291,19 +451,19 @@
           "profile": "short",
           "ok": true,
           "error": "",
-          "rtf": 0.6929,
+          "rtf": 0.5924,
           "peak_vram_mb": 5560.0,
-          "audio_seconds": 4.0,
-          "generation_seconds": 2.772
+          "audio_seconds": 3.68,
+          "generation_seconds": 2.18
         },
         {
           "profile": "long",
           "ok": true,
           "error": "",
-          "rtf": 0.5178,
+          "rtf": 0.466,
           "peak_vram_mb": 5560.0,
           "audio_seconds": 9.12,
-          "generation_seconds": 4.723
+          "generation_seconds": 4.25
         }
       ]
     },
@@ -342,10 +502,10 @@
         "HF_TOKEN": ""
       },
       "feasible": false,
-      "rejected": "peak 5.43 GB exceeds the 5.40 GB budget (limit 5.5 GB - margin 0.1 GB)",
+      "rejected": "worst-profile RTF 0.542 exceeds the target 0.5",
       "skipped": false,
-      "worst_rtf": 0.7096,
-      "mean_rtf": 0.6142,
+      "worst_rtf": 0.5423,
+      "mean_rtf": 0.4917,
       "peak_vram_mb": 5560.0,
       "peak_vram_gb": 5.43,
       "usable_audio_seconds": 9.12,
@@ -355,19 +515,19 @@
           "profile": "short",
           "ok": true,
           "error": "",
-          "rtf": 0.7096,
+          "rtf": 0.5423,
           "peak_vram_mb": 5560.0,
-          "audio_seconds": 3.52,
-          "generation_seconds": 2.498
+          "audio_seconds": 4.0,
+          "generation_seconds": 2.169
         },
         {
           "profile": "long",
           "ok": true,
           "error": "",
-          "rtf": 0.5188,
+          "rtf": 0.441,
           "peak_vram_mb": 5560.0,
           "audio_seconds": 9.12,
-          "generation_seconds": 4.731
+          "generation_seconds": 4.021
         }
       ]
     },
@@ -451,10 +611,10 @@
         "HF_TOKEN": ""
       },
       "feasible": false,
-      "rejected": "peak 5.43 GB exceeds the 5.40 GB budget (limit 5.5 GB - margin 0.1 GB)",
+      "rejected": "worst-profile RTF 0.606 exceeds the target 0.5",
       "skipped": false,
-      "worst_rtf": 0.7025,
-      "mean_rtf": 0.6135,
+      "worst_rtf": 0.6062,
+      "mean_rtf": 0.5267,
       "peak_vram_mb": 5560.0,
       "peak_vram_gb": 5.43,
       "usable_audio_seconds": 9.12,
@@ -464,19 +624,19 @@
           "profile": "short",
           "ok": true,
           "error": "",
-          "rtf": 0.7025,
+          "rtf": 0.6062,
           "peak_vram_mb": 5560.0,
-          "audio_seconds": 3.84,
-          "generation_seconds": 2.698
+          "audio_seconds": 4.0,
+          "generation_seconds": 2.425
         },
         {
           "profile": "long",
           "ok": true,
           "error": "",
-          "rtf": 0.5245,
+          "rtf": 0.4473,
           "peak_vram_mb": 5560.0,
           "audio_seconds": 9.12,
-          "generation_seconds": 4.784
+          "generation_seconds": 4.08
         }
       ]
     },
@@ -515,10 +675,10 @@
         "HF_TOKEN": ""
       },
       "feasible": false,
-      "rejected": "peak 5.43 GB exceeds the 5.40 GB budget (limit 5.5 GB - margin 0.1 GB)",
+      "rejected": "worst-profile RTF 0.601 exceeds the target 0.5",
       "skipped": false,
-      "worst_rtf": 0.6737,
-      "mean_rtf": 0.5975,
+      "worst_rtf": 0.6006,
+      "mean_rtf": 0.5589,
       "peak_vram_mb": 5560.0,
       "peak_vram_gb": 5.43,
       "usable_audio_seconds": 9.12,
@@ -528,19 +688,19 @@
           "profile": "short",
           "ok": true,
           "error": "",
-          "rtf": 0.6737,
+          "rtf": 0.6006,
           "peak_vram_mb": 5560.0,
           "audio_seconds": 3.84,
-          "generation_seconds": 2.587
+          "generation_seconds": 2.306
         },
         {
           "profile": "long",
           "ok": true,
           "error": "",
-          "rtf": 0.5212,
+          "rtf": 0.5171,
           "peak_vram_mb": 5560.0,
           "audio_seconds": 9.12,
-          "generation_seconds": 4.753
+          "generation_seconds": 4.716
         }
       ]
     },
@@ -579,10 +739,10 @@
         "HF_TOKEN": ""
       },
       "feasible": false,
-      "rejected": "peak 5.42 GB exceeds the 5.40 GB budget (limit 5.5 GB - margin 0.1 GB)",
+      "rejected": "worst-profile RTF 0.537 exceeds the target 0.5",
       "skipped": false,
-      "worst_rtf": 0.5827,
-      "mean_rtf": 0.5221,
+      "worst_rtf": 0.5372,
+      "mean_rtf": 0.5169,
       "peak_vram_mb": 5546.0,
       "peak_vram_gb": 5.416,
       "usable_audio_seconds": 9.12,
@@ -592,19 +752,19 @@
           "profile": "short",
           "ok": true,
           "error": "",
-          "rtf": 0.5827,
+          "rtf": 0.5372,
           "peak_vram_mb": 5546.0,
           "audio_seconds": 3.84,
-          "generation_seconds": 2.237
+          "generation_seconds": 2.063
         },
         {
           "profile": "long",
           "ok": true,
           "error": "",
-          "rtf": 0.4614,
+          "rtf": 0.4965,
           "peak_vram_mb": 5546.0,
           "audio_seconds": 9.12,
-          "generation_seconds": 4.208
+          "generation_seconds": 4.528
         }
       ]
     },
@@ -643,10 +803,10 @@
         "HF_TOKEN": ""
       },
       "feasible": false,
-      "rejected": "peak 5.44 GB exceeds the 5.40 GB budget (limit 5.5 GB - margin 0.1 GB)",
+      "rejected": "worst-profile RTF 0.673 exceeds the target 0.5",
       "skipped": false,
-      "worst_rtf": 0.6164,
-      "mean_rtf": 0.552,
+      "worst_rtf": 0.6726,
+      "mean_rtf": 0.5961,
       "peak_vram_mb": 5570.0,
       "peak_vram_gb": 5.439,
       "usable_audio_seconds": 9.12,
@@ -656,19 +816,19 @@
           "profile": "short",
           "ok": true,
           "error": "",
-          "rtf": 0.6164,
+          "rtf": 0.6726,
           "peak_vram_mb": 5568.0,
-          "audio_seconds": 3.84,
-          "generation_seconds": 2.367
+          "audio_seconds": 3.68,
+          "generation_seconds": 2.475
         },
         {
           "profile": "long",
           "ok": true,
           "error": "",
-          "rtf": 0.4877,
+          "rtf": 0.5197,
           "peak_vram_mb": 5570.0,
           "audio_seconds": 9.12,
-          "generation_seconds": 4.447
+          "generation_seconds": 4.74
         }
       ]
     },
@@ -707,10 +867,10 @@
         "HF_TOKEN": ""
       },
       "feasible": false,
-      "rejected": "worst-profile RTF 0.522 exceeds the target 0.5",
+      "rejected": "worst-profile RTF 0.526 exceeds the target 0.5",
       "skipped": false,
-      "worst_rtf": 0.5216,
-      "mean_rtf": 0.4722,
+      "worst_rtf": 0.5258,
+      "mean_rtf": 0.4761,
       "peak_vram_mb": 5440.0,
       "peak_vram_gb": 5.312,
       "usable_audio_seconds": 9.12,
@@ -720,19 +880,19 @@
           "profile": "short",
           "ok": true,
           "error": "",
-          "rtf": 0.5216,
+          "rtf": 0.5258,
           "peak_vram_mb": 5438.0,
-          "audio_seconds": 3.84,
-          "generation_seconds": 2.003
+          "audio_seconds": 3.68,
+          "generation_seconds": 1.935
         },
         {
           "profile": "long",
           "ok": true,
           "error": "",
-          "rtf": 0.4229,
+          "rtf": 0.4263,
           "peak_vram_mb": 5440.0,
           "audio_seconds": 9.12,
-          "generation_seconds": 3.857
+          "generation_seconds": 3.888
         }
       ]
     },
@@ -771,10 +931,10 @@
         "HF_TOKEN": ""
       },
       "feasible": false,
-      "rejected": "peak 5.43 GB exceeds the 5.40 GB budget (limit 5.5 GB - margin 0.1 GB)",
+      "rejected": "worst-profile RTF 0.557 exceeds the target 0.5",
       "skipped": false,
-      "worst_rtf": 0.5486,
-      "mean_rtf": 0.502,
+      "worst_rtf": 0.5575,
+      "mean_rtf": 0.5058,
       "peak_vram_mb": 5560.0,
       "peak_vram_gb": 5.43,
       "usable_audio_seconds": 9.12,
@@ -784,19 +944,19 @@
           "profile": "short",
           "ok": true,
           "error": "",
-          "rtf": 0.5486,
+          "rtf": 0.5575,
           "peak_vram_mb": 5558.0,
-          "audio_seconds": 4.16,
-          "generation_seconds": 2.282
+          "audio_seconds": 3.84,
+          "generation_seconds": 2.141
         },
         {
           "profile": "long",
           "ok": true,
           "error": "",
-          "rtf": 0.4554,
+          "rtf": 0.4541,
           "peak_vram_mb": 5560.0,
           "audio_seconds": 9.12,
-          "generation_seconds": 4.153
+          "generation_seconds": 4.142
         }
       ]
     },
@@ -835,10 +995,10 @@
         "HF_TOKEN": ""
       },
       "feasible": false,
-      "rejected": "peak 5.43 GB exceeds the 5.40 GB budget (limit 5.5 GB - margin 0.1 GB)",
+      "rejected": "worst-profile RTF 0.589 exceeds the target 0.5",
       "skipped": false,
-      "worst_rtf": 0.531,
-      "mean_rtf": 0.492,
+      "worst_rtf": 0.589,
+      "mean_rtf": 0.5214,
       "peak_vram_mb": 5560.0,
       "peak_vram_gb": 5.43,
       "usable_audio_seconds": 9.12,
@@ -848,19 +1008,19 @@
           "profile": "short",
           "ok": true,
           "error": "",
-          "rtf": 0.531,
+          "rtf": 0.589,
           "peak_vram_mb": 5560.0,
-          "audio_seconds": 4.48,
-          "generation_seconds": 2.379
+          "audio_seconds": 3.2,
+          "generation_seconds": 1.885
         },
         {
           "profile": "long",
           "ok": true,
           "error": "",
-          "rtf": 0.4531,
+          "rtf": 0.4539,
           "peak_vram_mb": 5560.0,
           "audio_seconds": 9.12,
-          "generation_seconds": 4.132
+          "generation_seconds": 4.139
         }
       ]
     },
@@ -898,33 +1058,33 @@
         "TTS_API_URL": "http://localhost:8000",
         "HF_TOKEN": ""
       },
-      "feasible": false,
-      "rejected": "peak 5.43 GB exceeds the 5.40 GB budget (limit 5.5 GB - margin 0.1 GB)",
+      "feasible": true,
+      "rejected": "",
       "skipped": false,
-      "worst_rtf": 0.5476,
-      "mean_rtf": 0.5082,
+      "worst_rtf": 0.4809,
+      "mean_rtf": 0.4763,
       "peak_vram_mb": 5560.0,
       "peak_vram_gb": 5.43,
       "usable_audio_seconds": 9.12,
-      "score": null,
+      "score": 0.44392,
       "trials": [
         {
           "profile": "short",
           "ok": true,
           "error": "",
-          "rtf": 0.5476,
+          "rtf": 0.4809,
           "peak_vram_mb": 5558.0,
-          "audio_seconds": 3.52,
-          "generation_seconds": 1.927
+          "audio_seconds": 3.84,
+          "generation_seconds": 1.847
         },
         {
           "profile": "long",
           "ok": true,
           "error": "",
-          "rtf": 0.4688,
+          "rtf": 0.4718,
           "peak_vram_mb": 5560.0,
           "audio_seconds": 9.12,
-          "generation_seconds": 4.276
+          "generation_seconds": 4.303
         }
       ]
     },
@@ -941,7 +1101,7 @@
         "TTS_MAX_SEQUENCE_LENGTH": "1024",
         "TTS_VOCODER_MERGE_STEPS": "4",
         "TTS_LOW_VRAM_PATCHES": "true",
-        "TTS_VOCODER_CHUNK_PATCHES": "12",
+        "TTS_VOCODER_CHUNK_PATCHES": "32",
         "TTS_NUM_STEPS": "2",
         "TTS_GUIDANCE_SCALE": "1.2",
         "TTS_SPEAKER_SCALE": "1.5",
@@ -962,33 +1122,33 @@
         "TTS_API_URL": "http://localhost:8000",
         "HF_TOKEN": ""
       },
-      "feasible": false,
-      "rejected": "peak 5.43 GB exceeds the 5.40 GB budget (limit 5.5 GB - margin 0.1 GB)",
+      "feasible": true,
+      "rejected": "",
       "skipped": false,
-      "worst_rtf": 0.5546,
-      "mean_rtf": 0.5034,
+      "worst_rtf": 0.4863,
+      "mean_rtf": 0.4769,
       "peak_vram_mb": 5560.0,
       "peak_vram_gb": 5.43,
       "usable_audio_seconds": 9.12,
-      "score": null,
+      "score": 0.44932,
       "trials": [
         {
           "profile": "short",
           "ok": true,
           "error": "",
-          "rtf": 0.5546,
-          "peak_vram_mb": 5558.0,
+          "rtf": 0.4863,
+          "peak_vram_mb": 5560.0,
           "audio_seconds": 3.68,
-          "generation_seconds": 2.041
+          "generation_seconds": 1.79
         },
         {
           "profile": "long",
           "ok": true,
           "error": "",
-          "rtf": 0.4523,
+          "rtf": 0.4676,
           "peak_vram_mb": 5560.0,
           "audio_seconds": 9.12,
-          "generation_seconds": 4.125
+          "generation_seconds": 4.265
         }
       ]
     },
@@ -1005,7 +1165,7 @@
         "TTS_MAX_SEQUENCE_LENGTH": "1024",
         "TTS_VOCODER_MERGE_STEPS": "4",
         "TTS_LOW_VRAM_PATCHES": "true",
-        "TTS_VOCODER_CHUNK_PATCHES": "12",
+        "TTS_VOCODER_CHUNK_PATCHES": "32",
         "TTS_NUM_STEPS": "2",
         "TTS_GUIDANCE_SCALE": "1.2",
         "TTS_SPEAKER_SCALE": "1.5",
@@ -1027,32 +1187,23 @@
         "HF_TOKEN": ""
       },
       "feasible": false,
-      "rejected": "worst-profile RTF 0.773 exceeds the target 0.5",
+      "rejected": "docker compose exec -T tts python scripts/benchmark_test.py --api-url http://127.0.0.1:8000 --reference-audio /app/data/input/ref_l.wav --reference-text /app/data/input/ref_l.txt --text Buongiorno. Oggi parlo con te per un momento di silenzio e di pace. --samples 1 --warmup 1 --report /app/data/outp",
       "skipped": false,
-      "worst_rtf": 0.7732,
-      "mean_rtf": 0.7726,
-      "peak_vram_mb": 5502.0,
-      "peak_vram_gb": 5.373,
-      "usable_audio_seconds": 9.12,
+      "worst_rtf": null,
+      "mean_rtf": null,
+      "peak_vram_mb": null,
+      "peak_vram_gb": null,
+      "usable_audio_seconds": null,
       "score": null,
       "trials": [
         {
           "profile": "short",
-          "ok": true,
-          "error": "",
-          "rtf": 0.7732,
-          "peak_vram_mb": 5484.0,
-          "audio_seconds": 3.68,
-          "generation_seconds": 2.845
-        },
-        {
-          "profile": "long",
-          "ok": true,
-          "error": "",
-          "rtf": 0.772,
-          "peak_vram_mb": 5502.0,
-          "audio_seconds": 9.12,
-          "generation_seconds": 7.04
+          "ok": false,
+          "error": "docker compose exec -T tts python scripts/benchmark_test.py --api-url http://127.0.0.1:8000 --reference-audio /app/data/input/ref_l.wav --reference-text /app/data/input/ref_l.txt --text Buongiorno. Oggi parlo con te per un momento di silenzio e di pace. --samples 1 --warmup 1 --report /app/data/output/tune_0029.json --output /app/data/output/tune_0029.wav --no-fail failed (1):\n[benchmark] warmup call failed: {\"detail\":{\"error\":\"out_of_memory\",\"message\":\"OutOfMemoryError: CUDA out of memory. Tried to allocate 38.00 MiB. GPU 0 has a total capacity of 5.64 GiB of which 24.12 MiB is free. Including non-PyTorch memory, this process has 5.55 GiB memory in use. Of the allocated memory 5.17 GiB is allocated by PyTorch, and 270.59 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See do",
+          "rtf": null,
+          "peak_vram_mb": null,
+          "audio_seconds": null,
+          "generation_seconds": null
         }
       ]
     },
@@ -1069,7 +1220,7 @@
         "TTS_MAX_SEQUENCE_LENGTH": "1024",
         "TTS_VOCODER_MERGE_STEPS": "4",
         "TTS_LOW_VRAM_PATCHES": "true",
-        "TTS_VOCODER_CHUNK_PATCHES": "12",
+        "TTS_VOCODER_CHUNK_PATCHES": "32",
         "TTS_NUM_STEPS": "2",
         "TTS_GUIDANCE_SCALE": "1.2",
         "TTS_SPEAKER_SCALE": "1.5",
@@ -1091,10 +1242,10 @@
         "HF_TOKEN": ""
       },
       "feasible": false,
-      "rejected": "peak 5.43 GB exceeds the 5.40 GB budget (limit 5.5 GB - margin 0.1 GB)",
+      "rejected": "worst-profile RTF 0.506 exceeds the target 0.5",
       "skipped": false,
-      "worst_rtf": 0.5639,
-      "mean_rtf": 0.5082,
+      "worst_rtf": 0.5064,
+      "mean_rtf": 0.4895,
       "peak_vram_mb": 5560.0,
       "peak_vram_gb": 5.43,
       "usable_audio_seconds": 9.12,
@@ -1104,19 +1255,19 @@
           "profile": "short",
           "ok": true,
           "error": "",
-          "rtf": 0.5639,
+          "rtf": 0.5064,
           "peak_vram_mb": 5558.0,
-          "audio_seconds": 3.52,
-          "generation_seconds": 1.985
+          "audio_seconds": 3.36,
+          "generation_seconds": 1.702
         },
         {
           "profile": "long",
           "ok": true,
           "error": "",
-          "rtf": 0.4526,
+          "rtf": 0.4726,
           "peak_vram_mb": 5560.0,
           "audio_seconds": 9.12,
-          "generation_seconds": 4.128
+          "generation_seconds": 4.31
         }
       ]
     },
@@ -1133,7 +1284,7 @@
         "TTS_MAX_SEQUENCE_LENGTH": "1024",
         "TTS_VOCODER_MERGE_STEPS": "4",
         "TTS_LOW_VRAM_PATCHES": "true",
-        "TTS_VOCODER_CHUNK_PATCHES": "12",
+        "TTS_VOCODER_CHUNK_PATCHES": "32",
         "TTS_NUM_STEPS": "2",
         "TTS_GUIDANCE_SCALE": "1.2",
         "TTS_SPEAKER_SCALE": "1.5",
@@ -1155,10 +1306,10 @@
         "HF_TOKEN": ""
       },
       "feasible": false,
-      "rejected": "peak 5.43 GB exceeds the 5.40 GB budget (limit 5.5 GB - margin 0.1 GB)",
+      "rejected": "worst-profile RTF 0.518 exceeds the target 0.5",
       "skipped": false,
-      "worst_rtf": 0.569,
-      "mean_rtf": 0.5121,
+      "worst_rtf": 0.518,
+      "mean_rtf": 0.4924,
       "peak_vram_mb": 5560.0,
       "peak_vram_gb": 5.43,
       "usable_audio_seconds": 9.12,
@@ -1168,19 +1319,19 @@
           "profile": "short",
           "ok": true,
           "error": "",
-          "rtf": 0.569,
+          "rtf": 0.518,
           "peak_vram_mb": 5560.0,
-          "audio_seconds": 3.52,
-          "generation_seconds": 2.003
+          "audio_seconds": 3.2,
+          "generation_seconds": 1.657
         },
         {
           "profile": "long",
           "ok": true,
           "error": "",
-          "rtf": 0.4552,
+          "rtf": 0.4668,
           "peak_vram_mb": 5560.0,
           "audio_seconds": 9.12,
-          "generation_seconds": 4.152
+          "generation_seconds": 4.257
         }
       ]
     }

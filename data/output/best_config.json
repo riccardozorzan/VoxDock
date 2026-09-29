@@ -1,0 +1,48 @@
+{
+  "generated": "2026-09-29T06:08:41+00:00",
+  "generated_by": "scripts/autotune.py",
+  "host": {
+    "gpu": null
+  },
+  "objective": "balanced",
+  "constraints": {
+    "vram_limit_gb": 5.5,
+    "vram_margin_gb": 0.02,
+    "rtf_target": 0.5
+  },
+  "reference": {
+    "name": "ref_l",
+    "label": "3 sentences",
+    "seconds": 11.45,
+    "patches": 72
+  },
+  "settings": {
+    "TTS_MODEL_NAME": "dots-studio/dots.tts-mf",
+    "TTS_PRECISION": "bfloat16",
+    "TTS_OPTIMIZE": true,
+    "TTS_MAX_GENERATE_LENGTH": 128,
+    "TTS_MAX_SEQUENCE_LENGTH": 1024,
+    "TTS_LOW_VRAM_PATCHES": true,
+    "TTS_VOCODER_CHUNK_PATCHES": 32,
+    "TTS_NUM_STEPS": 2,
+    "TTS_GUIDANCE_SCALE": 1.2
+  },
+  "measured": {
+    "score": 0.443916875,
+    "peak_vram_mb": 5560.0,
+    "worst_rtf": 0.4809,
+    "usable_audio_seconds": 9.12
+  },
+  "variants": [
+    {
+      "model": "dots-studio/dots.tts-mf",
+      "attempts": 18,
+      "feasible": 2,
+      "best_rtf": 0.4809,
+      "min_peak_vram_mb": 5560.0,
+      "best_score": 0.443916875,
+      "is_winner": false,
+      "last_error": "worst-profile RTF 0.518 exceeds the target 0.5"
+    }
+  ]
+}
