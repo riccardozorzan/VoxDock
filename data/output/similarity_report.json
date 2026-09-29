@@ -1,0 +1,31 @@
+{
+  "timestamp": "2026-09-29T08:06:23+00:00",
+  "model": "speechbrain/spkrec-ecapa-voxceleb",
+  "reference": "data/references/my_voice_v2.wav",
+  "reference_seconds": 14.914,
+  "controls": {
+    "self": 1.0,
+    "impostor": null
+  },
+  "generated": [
+    {
+      "file": "data/output/test_audio_sample.wav",
+      "seconds": 48.52,
+      "similarity": 0.7583,
+      "relative_to_controls": 0.7583
+    },
+    {
+      "file": "data/output/test_api.wav",
+      "seconds": 3.36,
+      "similarity": 0.6392,
+      "relative_to_controls": 0.6392
+    },
+    {
+      "file": "data/references/my_voice_v1.wav",
+      "seconds": 23.613,
+      "similarity": 0.7146,
+      "relative_to_controls": 0.7146
+    }
+  ],
+  "note": "Cosine similarity is relative. Judge the generated scores against the two controls, not against an absolute threshold."
+}

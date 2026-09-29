@@ -14,6 +14,9 @@ data/temp_chunks/
 # Registered speaker prompts: the WAVs are covered by the *.wav rule above, but
 # the sidecar transcripts are personal too, so the whole store is ignored.
 data/speakers/
+# Downloaded model weights for scripts/speaker_similarity.py (ECAPA-TDNN, ~22 MB).
+# Machine-local and regenerable, like the HF checkpoint cache in the container.
+data/.speechbrain/
 
 # Generated audio is ignored, but the JSON reports are kept: they are small and
 # they are the evidence behind every number claimed in the docs

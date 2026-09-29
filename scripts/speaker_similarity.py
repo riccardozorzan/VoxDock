@@ -116,7 +116,11 @@ class Embedder:
         model = self._ensure()
         tensor = torch.from_numpy(audio).unsqueeze(0)
         with torch.no_grad():
-            embedding = model.encode_batch(tensor).squeeze(0)
+            embedding = model.encode_batch(tensor)
+        # encode_batch returns (batch, 1, dim) for some speechbrain versions
+        # and (batch, dim) for others, so flatten to a single 1-D vector rather
+        # than assuming a rank.
+        embedding = embedding.reshape(-1)
         # L2-normalise so the dot product below is a true cosine similarity
         # and cannot be inflated by a longer or louder clip.
         return torch.nn.functional.normalize(embedding, dim=0)
