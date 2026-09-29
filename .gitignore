@@ -50,3 +50,9 @@ venv/
 
 # Long soak-test input (1,400 words of filler), regenerable with a one-liner.
 data/input/soak.txt
+
+# Private roadmap, deliberately untracked: TODO/ holds notes to self that are not
+# part of the project. Listed here because untracked-but-not-ignored is exactly the
+# state where a `git add -A` sweeps it into a commit by accident. Anything under
+# TODO/ stays local; `git add -f` if one day a file there should ship.
+TODO/

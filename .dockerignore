@@ -12,6 +12,10 @@ env
 
 # Local configuration & secrets
 .env
+# Private roadmap notes: never tracked, and the build does not need them. The
+# build context is the whole directory, so without this they are still streamed
+# to the Docker daemon even though nothing COPYs them.
+TODO/
 
 # Data is mounted as a volume at runtime, never baked into the image
 data
