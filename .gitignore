@@ -1,7 +1,9 @@
 # Local configuration. `.env` holds this machine's settings (and a slot for
-# HF_TOKEN); `.env.example` is the committed template.
+# HF_TOKEN); `.env.example` is the committed template. `autotune.py --apply`
+# writes timestamped backups named `<name>.env.bak-<stamp>`, hence both patterns.
 .env
 .env.bak-*
+*.env.bak-*
 
 # Voice recordings and derived audio: large, and personal. The transcripts
 # (data/**/*.txt) and reference_set.json are kept - they are small and are what
@@ -29,3 +31,5 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+.pytest_cache/
+
