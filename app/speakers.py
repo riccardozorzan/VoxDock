@@ -139,6 +139,32 @@ class SpeakerRegistry:
         logger.info("Registered speaker %s (%d bytes)", identifier, len(audio_bytes))
         return record
 
+    def _resolve_within_root(self, candidate: str, speaker_id: str) -> Optional[Path]:
+        """Resolve a path from the metadata, refusing anything outside the root.
+
+        The metadata sidecar is a plain JSON file inside a **host bind mount**
+        (``./data``), so it is not fully trusted input: anything able to write
+        ``data/speakers/<id>.json`` can put an arbitrary ``audio_path`` in it,
+        and callers such as ``POST /v1/audio/speech`` then use that path as the
+        synthesis prompt. Requiring the resolved path to sit inside the speakers
+        directory means a planted sidecar can only ever point at another
+        registered clip, never at ``/etc/passwd`` or a host file.
+        """
+        try:
+            resolved = Path(candidate).resolve()
+            root = self.root.resolve()
+        except (OSError, ValueError):
+            return None
+        if resolved != root and root not in resolved.parents:
+            logger.warning(
+                "speaker %s: audio_path %s is outside %s; refusing",
+                speaker_id,
+                candidate,
+                root,
+            )
+            return None
+        return resolved
+
     def get(self, speaker_id: str) -> Optional[SpeakerRecord]:
         meta = self._meta_path(speaker_id)
         if not meta.exists():
@@ -148,9 +174,14 @@ class SpeakerRegistry:
         except (OSError, json.JSONDecodeError) as exc:
             logger.warning("speaker %s has unreadable metadata: %s", speaker_id, exc)
             return None
+        audio_path = self._resolve_within_root(
+            str(payload.get("audio_path") or ""), speaker_id
+        )
+        if audio_path is None:
+            return None
         record = SpeakerRecord(
             id=str(payload.get("id") or speaker_id),
-            audio_path=str(payload.get("audio_path") or ""),
+            audio_path=str(audio_path),
             text_path=str(payload.get("text_path") or ""),
             reference_text=str(payload.get("reference_text") or ""),
             audio_bytes=int(payload.get("audio_bytes") or 0),
@@ -159,7 +190,7 @@ class SpeakerRegistry:
             requests=int(payload.get("requests") or 0),
         )
         # A clip deleted behind our back must not resolve as usable.
-        if not record.audio_path or not Path(record.audio_path).exists():
+        if not audio_path.exists():
             logger.warning("speaker %s: audio file missing on disk", speaker_id)
             return None
         return record
