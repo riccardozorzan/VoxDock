@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-09-28T15:38:39+00:00",
+  "timestamp": "2026-09-29T08:37:00+00:00",
   "ok": true,
   "thresholds": {
     "peak_vram_limit_gb": 5.5,
@@ -12,8 +12,8 @@
     "http_ok": true
   },
   "cold_start": {
-    "script_wait_seconds": 0.05,
-    "server_checkpoint_load_seconds": 197.742,
+    "script_wait_seconds": 0.045,
+    "server_checkpoint_load_seconds": 61.579,
     "model_load_seconds": null
   },
   "environment": {
@@ -29,7 +29,7 @@
       "default_num_steps": 2,
       "default_guidance_scale": 1.2,
       "default_seed": 42,
-      "cold_start_seconds": 197.742,
+      "cold_start_seconds": 61.579,
       "audio_patch_seconds": 0.16,
       "sample_rate": 48000
     },
@@ -40,12 +40,12 @@
       "torch_version": "2.8.0+cu128",
       "cuda_version": "12.8",
       "vram_total_mb": 5772.81,
-      "vram_allocated_mb": 5232.85,
-      "vram_free_mb": 354.94,
-      "vram_used_mb": 5417.88,
-      "vram_reserved_mb": 5278.0,
-      "vram_peak_allocated_mb": 5510.62,
-      "vram_peak_reserved_mb": 5560.0,
+      "vram_allocated_mb": 5234.19,
+      "vram_free_mb": 135.0,
+      "vram_used_mb": 5637.81,
+      "vram_reserved_mb": 5500.0,
+      "vram_peak_allocated_mb": 5425.79,
+      "vram_peak_reserved_mb": 5500.0,
       "error": null
     }
   },
@@ -66,102 +66,102 @@
     "http_success": 3,
     "http_failures": 0,
     "audio_seconds_mean": 13.44,
-    "generation_seconds_mean": 6.234,
-    "rtf_mean": 0.4638,
-    "rtf_p50": 0.4688,
-    "rtf_p90": 0.4694,
-    "speed_factor_mean": 2.1567,
-    "peak_vram_mb": 5510.6,
-    "peak_vram_gb": 5.381,
-    "vram_free_mb_after": 334.94,
-    "lifetime_peak_vram_mb": 5510.62
+    "generation_seconds_mean": 6.051,
+    "rtf_mean": 0.4502,
+    "rtf_p50": 0.4482,
+    "rtf_p90": 0.4532,
+    "speed_factor_mean": 2.2212,
+    "peak_vram_mb": 5556.0,
+    "peak_vram_gb": 5.426,
+    "vram_free_mb_after": 359.0,
+    "lifetime_peak_vram_mb": 5458.71
   },
   "samples": [
     {
       "http_status": 200,
-      "client_wall_seconds": 6.3279,
-      "request_id": "5303e302aad3ca36",
+      "client_wall_seconds": 6.1188,
+      "request_id": "496eeacba1588b08",
       "audio_seconds": 13.44,
-      "generation_seconds": 6.312,
-      "rtf": 0.4696,
-      "engine_rtf": 0.4694,
-      "speed_factor": 2.1293,
-      "peak_vram_mb": 5453.2,
+      "generation_seconds": 6.107,
+      "rtf": 0.4544,
+      "engine_rtf": 0.4541,
+      "speed_factor": 2.2008,
+      "peak_vram_mb": 5458.7,
       "sample_rate": 48000.0,
       "poller": {
-        "samples": 21,
-        "peak_allocated_mb": 5453.25,
-        "peak_reserved_mb": 5510.0,
-        "peak_lifetime_mb": 5510.62
+        "samples": 20,
+        "peak_allocated_mb": 5458.71,
+        "peak_reserved_mb": 5556.0,
+        "peak_lifetime_mb": 5458.71
       },
       "health_before": {
-        "vram_allocated_mb": 5233.03,
-        "vram_free_mb": 334.94,
-        "lifetime_peak_vram_mb": 5510.62
+        "vram_allocated_mb": 5232.47,
+        "vram_free_mb": 359.0,
+        "lifetime_peak_vram_mb": 5458.71
       },
       "health_after": {
-        "vram_allocated_mb": 5233.03,
-        "vram_free_mb": 334.94,
-        "vram_peak_allocated_mb": 5453.25,
-        "lifetime_peak_vram_mb": 5510.62
+        "vram_allocated_mb": 5232.47,
+        "vram_free_mb": 359.0,
+        "vram_peak_allocated_mb": 5458.71,
+        "lifetime_peak_vram_mb": 5458.71
       }
     },
     {
       "http_status": 200,
-      "client_wall_seconds": 6.3142,
-      "request_id": "0002d9c9e8fd1b4d",
+      "client_wall_seconds": 6.0364,
+      "request_id": "fe71f7f1c451c8b6",
       "audio_seconds": 13.44,
-      "generation_seconds": 6.301,
-      "rtf": 0.4688,
-      "engine_rtf": 0.4685,
-      "speed_factor": 2.1332,
-      "peak_vram_mb": 5453.2,
+      "generation_seconds": 6.024,
+      "rtf": 0.4482,
+      "engine_rtf": 0.448,
+      "speed_factor": 2.2311,
+      "peak_vram_mb": 5458.7,
       "sample_rate": 48000.0,
       "poller": {
-        "samples": 22,
-        "peak_allocated_mb": 5453.25,
-        "peak_reserved_mb": 5510.0,
-        "peak_lifetime_mb": 5510.62
+        "samples": 20,
+        "peak_allocated_mb": 5458.71,
+        "peak_reserved_mb": 5556.0,
+        "peak_lifetime_mb": 5458.71
       },
       "health_before": {
-        "vram_allocated_mb": 5233.03,
-        "vram_free_mb": 334.94,
-        "lifetime_peak_vram_mb": 5510.62
+        "vram_allocated_mb": 5232.47,
+        "vram_free_mb": 359.0,
+        "lifetime_peak_vram_mb": 5458.71
       },
       "health_after": {
-        "vram_allocated_mb": 5233.03,
-        "vram_free_mb": 334.94,
-        "vram_peak_allocated_mb": 5453.25,
-        "lifetime_peak_vram_mb": 5510.62
+        "vram_allocated_mb": 5232.47,
+        "vram_free_mb": 359.0,
+        "vram_peak_allocated_mb": 5458.71,
+        "lifetime_peak_vram_mb": 5458.71
       }
     },
     {
       "http_status": 200,
-      "client_wall_seconds": 6.0996,
-      "request_id": "356e11d45f218342",
+      "client_wall_seconds": 6.0321,
+      "request_id": "fad1c917f1204570",
       "audio_seconds": 13.44,
-      "generation_seconds": 6.088,
-      "rtf": 0.453,
-      "engine_rtf": 0.4527,
-      "speed_factor": 2.2076,
-      "peak_vram_mb": 5453.2,
+      "generation_seconds": 6.022,
+      "rtf": 0.4481,
+      "engine_rtf": 0.4477,
+      "speed_factor": 2.2317,
+      "peak_vram_mb": 5458.7,
       "sample_rate": 48000.0,
       "poller": {
-        "samples": 21,
-        "peak_allocated_mb": 5453.25,
-        "peak_reserved_mb": 5510.0,
-        "peak_lifetime_mb": 5510.62
+        "samples": 19,
+        "peak_allocated_mb": 5458.71,
+        "peak_reserved_mb": 5556.0,
+        "peak_lifetime_mb": 5458.71
       },
       "health_before": {
-        "vram_allocated_mb": 5233.03,
-        "vram_free_mb": 334.94,
-        "lifetime_peak_vram_mb": 5510.62
+        "vram_allocated_mb": 5232.47,
+        "vram_free_mb": 359.0,
+        "lifetime_peak_vram_mb": 5458.71
       },
       "health_after": {
-        "vram_allocated_mb": 5233.03,
-        "vram_free_mb": 334.94,
-        "vram_peak_allocated_mb": 5453.25,
-        "lifetime_peak_vram_mb": 5510.62
+        "vram_allocated_mb": 5232.47,
+        "vram_free_mb": 359.0,
+        "vram_peak_allocated_mb": 5458.71,
+        "lifetime_peak_vram_mb": 5458.71
       }
     }
   ],
