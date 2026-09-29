@@ -45,9 +45,21 @@ EXPECTED_COMPOSE_DEFAULTS = {
 #: the pre-rename `dots-tts` / `local-tts-docker` naming.
 STALE_NAMES = ("dots-tts", "local-tts-docker")
 
+#: ``${VAR:-default}`` values that are deployment-critical but are **not** part
+#: of the project identity, so their source of truth is the Dockerfile rather
+#: than :mod:`app`.
+#:
+#: The uid/gid pair is baked into the image's ``/etc/passwd`` by the Dockerfile's
+#: ``ARG VOXDOCK_UID/VOXDOCK_GID`` defaults and consumed by compose's ``user:``
+#: and build args. The numbers have to agree in all three places: the container
+#: runs as that uid, and without a matching passwd entry startup dies with
+#: ``getpwuid(): uid not found``. ``tests/test_identity.py`` asserts the two
+#: files still agree.
+HOST_USER_DEFAULTS = {"VOXDOCK_UID": "1000", "VOXDOCK_GID": "1000"}
+
 
 def check_compose_defaults(text: str) -> list[str]:
-    """Every ``${VAR:-default}`` must carry the value from :mod:`app`."""
+    """Every ``${VAR:-default}`` must carry the value from its source of truth."""
     problems: list[str] = []
     found = dict(
         re.findall(r"\$\{(VOXDOCK_[A-Z_]+):-([^}]+)\}", text)
@@ -60,7 +72,16 @@ def check_compose_defaults(text: str) -> list[str]:
                 f"docker-compose.yml: {var} defaults to {found[var]!r} "
                 f"but app/__init__.py says {expected!r}"
             )
-    for var in set(found) - set(EXPECTED_COMPOSE_DEFAULTS):
+    for var, expected in HOST_USER_DEFAULTS.items():
+        if var not in found:
+            problems.append(f"docker-compose.yml: {var} is missing entirely")
+        elif found[var] != expected:
+            problems.append(
+                f"docker-compose.yml: {var} defaults to {found[var]!r} "
+                f"but the Dockerfile ARG says {expected!r}"
+            )
+    known = set(EXPECTED_COMPOSE_DEFAULTS) | set(HOST_USER_DEFAULTS)
+    for var in set(found) - known:
         problems.append(f"docker-compose.yml: unknown identity var {var}")
     return problems
 
