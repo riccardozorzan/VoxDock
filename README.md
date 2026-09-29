@@ -417,16 +417,37 @@ on this host, reference `my_voice_v2.wav`:
 | `my_voice_v1.wav` | 0.7146 | a **real** second recording of the same speaker |
 | `test_audio_sample.wav` | **0.7583** | 48.5 s of TTS output, long-form |
 | `test_api.wav` | 0.6392 | 2.9 s of TTS output, short |
+| VoxCeleb control | −0.005 / 0.019 | a **different** speaker (the floor) |
 
 The long-form synthesis scores *above* the real second recording of the same
-person, which is the meaningful result: the clone is not a degradation against
-genuine same-speaker speech. The short 2.9 s clip scores lower simply because a
-3-second sample gives the speaker encoder less to work with — a limitation of
-measuring short audio, not of the synthesis.
+person. With the impostor floor at ≈0, that is a genuine result rather than a
+metric that scores everything highly: on this scale ≈0.71 is same-speaker
+speech and 0.76 is the clone clearing it.
+
+The short 2.9 s clip scores lower simply because a 3-second sample gives the
+speaker encoder less to work with — a limitation of measuring short audio, not of
+the synthesis.
+
+The two VoxCeleb controls are the example clips shipped with the
+`speechbrain/spkrec-ecapa-voxceleb` model repo (id10003 and id10004). Two
+independent speakers both landing within ±0.02 of zero is what makes the floor
+trustworthy. Re-fetch them to reproduce:
+
+```bash
+docker compose exec tts python - <<'PY'
+import urllib.request, pathlib
+base = "https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb/resolve/main/"
+for name in ("example1.wav", "example2.flac"):
+    out = pathlib.Path("/app/data/references/controls") / name
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(urllib.request.urlopen(base + name, timeout=60).read())
+    print("saved", out)
+PY
+```
 
 These are cosine similarities, so they are only interpretable relative to each
-other. The script always reports a self-similarity ceiling (1.0000 here) and
-accepts `--impostor` for a different speaker as the floor; without both, an
+other and to the two controls. The script always reports a self-similarity
+ceiling (1.0000 here) and accepts `--impostor` for the floor; without both, an
 absolute threshold would be meaningless.
 
 ---

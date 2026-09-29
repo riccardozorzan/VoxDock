@@ -10,6 +10,10 @@
 # makes the cloning reproducible.
 data/**/*.wav
 data/temp_chunks/
+# Control clips for speaker_similarity.py: two different VoxCeleb speakers,
+# downloaded from the speechbrain model repo and used as the impostor floor.
+# Public benchmark audio, not personal, but also not ours to track.
+data/references/controls/
 
 # Registered speaker prompts: the WAVs are covered by the *.wav rule above, but
 # the sidecar transcripts are personal too, so the whole store is ignored.
