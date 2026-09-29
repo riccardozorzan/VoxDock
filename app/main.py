@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 
 from app import LOG_NAMESPACE, __version__
 from app.config import best_config, settings
@@ -43,6 +43,11 @@ from app.utils import (
 )
 
 logger = logging.getLogger(f"{LOG_NAMESPACE}.api")
+
+#: The single-page UI. Shipped inside the image by `COPY app ./app`, so it can
+#: never drift from the API it talks to. Resolved once, here, so a missing file
+#: is a startup-time constant rather than a 500 on every page load.
+UI_INDEX = Path(__file__).resolve().parent / "static" / "index.html"
 
 # --------------------------------------------------------------------------- #
 #  Runtime bootstrap
@@ -322,6 +327,22 @@ async def root(request: Request) -> dict[str, Any]:
         "rtf_target": settings.model.rtf_target,
         "timestamp": now_iso(),
     }
+
+@app.get("/ui", include_in_schema=False)
+async def ui() -> FileResponse:
+    """The single-page web UI.
+
+    A self-contained HTML file served straight from the image - no build step,
+    no Node, no second service. It is a thin client over the same public API
+    documented at ``/docs``, so it inherits the API's exposure exactly: with no
+    authentication of its own, binding the port to ``0.0.0.0`` would publish
+    synthesis to the network, which is why the default is ``127.0.0.1``.
+
+    Excluded from the schema on purpose: it is a UI, not an API surface, and
+    listing it would suggest it is part of the programmatic contract.
+    """
+    return FileResponse(UI_INDEX, media_type="text/html")
+
 
 @app.get(settings.api.health_path)
 async def health(request: Request) -> JSONResponse:

@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoxDock</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --panel-2: #1d212a; --line: #2a2f3a;
+    --fg: #e6e8ee; --muted: #9aa3b2; --accent: #6ea8fe;
+    --ok: #4ade80; --warn: #fbbf24; --err: #f87171;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+    padding: 18px 24px; border-bottom: 1px solid var(--line); }
+  header h1 { margin: 0; font-size: 19px; }
+  header .sub { color: var(--muted); font-size: 13px; }
+  header .spacer { flex: 1; }
+  main { display: grid; gap: 16px; padding: 20px 24px 60px;
+    grid-template-columns: minmax(0,1fr) minmax(0,1fr); align-items: start; }
+  @media (max-width: 900px) { main { grid-template-columns: minmax(0,1fr); } }
+  .card { background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 16px 18px; }
+  .card h2 { margin: 0 0 12px; font-size: 13px; text-transform: uppercase;
+    letter-spacing: .08em; color: var(--muted); font-weight: 600; }
+  .card.wide { grid-column: 1 / -1; }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+  input[type=text], textarea, select, input[type=file] { width: 100%;
+    background: var(--panel-2); color: var(--fg); border: 1px solid var(--line);
+    border-radius: 7px; padding: 9px 11px; font: inherit; }
+  textarea { resize: vertical; min-height: 96px; }
+  button { background: var(--accent); color: #0b1020; border: 0; border-radius: 7px;
+    padding: 9px 16px; font: inherit; font-weight: 600; cursor: pointer; margin-top: 12px; }
+  button.ghost { background: transparent; color: var(--fg); border: 1px solid var(--line); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .note { font-size: 12.5px; color: var(--muted); margin-top: 8px; }
+  .note.err { color: var(--err); } .note.ok { color: var(--ok); } .note.warn { color: var(--warn); }
+  .bar { height: 9px; background: var(--panel-2); border-radius: 99px;
+    overflow: hidden; margin: 7px 0 4px; }
+  .bar > i { display: block; height: 100%; background: var(--ok); width: 0; transition: width .3s; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; font-size: 13px; }
+  .kv dt { color: var(--muted); } .kv dd { margin: 0; font-family: var(--mono); text-align: right; }
+  .pill { display: inline-block; padding: 2px 9px; border-radius: 99px; font-size: 12px;
+    font-weight: 600; background: var(--panel-2); border: 1px solid var(--line); }
+  .pill.ok { color: var(--ok); border-color: #235c3a; }
+  .pill.warn { color: var(--warn); border-color: #5c4a1c; }
+  .pill.err { color: var(--err); border-color: #5c2626; }
+  audio { width: 100%; margin-top: 12px; }
+  ul.speakers { list-style: none; margin: 8px 0 0; padding: 0; }
+  ul.speakers li { display: flex; justify-content: space-between; gap: 10px;
+    padding: 6px 0; border-top: 1px solid var(--line); font-size: 13px; }
+  ul.speakers .meta { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>VoxDock</h1><span class="sub">local voice cloning &middot; dots.tts</span>
+  <span class="spacer"></span><span id="state" class="pill">connecting&hellip;</span>
+</header>
+<main>
+  <section class="card">
+    <h2>Synthesise</h2>
+    <label for="speaker">Voice</label>
+    <select id="speaker"><option value="">&mdash; no voice registered &mdash;</option></select>
+    <div class="note">Register one below, or upload a reference under <em>Advanced</em>.
+      A registered voice is sent as an id, so the clip is not re-uploaded every request.</div>
+    <label for="text">Text</label>
+    <textarea id="text" placeholder="Type the text to speak. Prosody follows . , ! ?"></textarea>
+    <div class="note" id="budget"></div>
+    <div class="row"><button id="go">Generate</button>
+      <button id="stop" class="ghost" disabled>Stop</button></div>
+    <div class="note" id="status"></div>
+    <audio id="player" controls></audio>
+  </section>
+
+  <section class="card">
+    <h2>Telemetry</h2>
+    <div class="bar"><i id="vramBar"></i></div>
+    <div class="note" id="vramLabel">&mdash;</div>
+    <dl class="kv" id="telemetry"></dl>
+    <div class="note">Polled every 2&nbsp;s. The bar is allocated VRAM against the
+      configured budget, not the physical total &mdash; the patches in
+      <code>app/patches.py</code> exist to keep it under that line.</div>
+  </section>
+
+  <section class="card">
+    <h2>Register a voice</h2>
+    <label for="regFile">Reference WAV (5&ndash;15 s, 48 kHz mono)</label>
+    <input type="file" id="regFile" accept="audio/*">
+    <label for="regText">Exact transcript of the clip</label>
+    <textarea id="regText" style="min-height:64px"
+      placeholder="Continuation cloning needs the transcript to match the audio word for word."></textarea>
+    <label for="regId">Name (optional)</label>
+    <input type="text" id="regId" placeholder="defaults to speaker-1, speaker-2, &hellip;">
+    <div class="row"><button id="regBtn">Register</button></div>
+    <div class="note" id="regStatus"></div>
+  </section>
+
+  <section class="card">
+    <h2>Registered voices</h2>
+    <ul class="speakers" id="speakerList"><li class="meta">loading&hellip;</li></ul>
+  </section>
+
+  <section class="card wide">
+    <h2>Advanced &mdash; one-off reference</h2>
+    <div class="note">Synthesise without registering anything. The clip is uploaded
+      with the request, so prefer a registered voice for repeated use.</div>
+    <label for="advFile">Reference WAV</label>
+    <input type="file" id="advFile" accept="audio/*">
+    <label for="advText">Exact transcript</label>
+    <input type="text" id="advText" placeholder="required unless a registered voice is selected">
+  </section>
+</main>
+<script>
+"use strict";
+
+/* The server reports the patch budget in /health. These two constants mirror
+   app/config.py ProcessingSettings.words_per_second and chunk_max_words, which
+   the API does not expose; if the config changes they should follow. */
+const WORDS_PER_SECOND = 2.5;
+const CHUNK_MAX_WORDS  = 35;
+
+const $ = (id) => document.getElementById(id);
+let speakers = [];
+let health = null;
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+  ));
+}
+
+function setState(text, cls) {
+  const el = $("state");
+  el.textContent = text;
+  el.className = "pill " + (cls || "");
+}
+
+/* ------------------------------------------------------------------ health */
+async function pollHealth() {
+  try {
+    const res = await fetch("health", { cache: "no-store" });
+    health = await res.json();
+    renderHealth();
+    renderBudget();
+  } catch (err) {
+    setState("offline", "err");
+  }
+}
+
+function renderHealth() {
+  const d = health;
+  setState(d.ready ? "ready" : (d.status || "loading"), d.ready ? "ok" : "warn");
+
+  const alloc = (d.gpu && d.gpu.vram_allocated_mb) || 0;
+  const total = (d.gpu && d.gpu.vram_total_mb) || 1;
+  const limitMb = (d.vram_limit_gb || 0) * 1024;
+  const pct = Math.min(100, (alloc / limitMb) * 100);
+
+  const bar = $("vramBar");
+  bar.style.width = pct.toFixed(1) + "%";
+  bar.style.background =
+    alloc > limitMb ? "var(--err)" : (pct > 92 ? "var(--warn)" : "var(--ok)");
+
+  $("vramLabel").textContent =
+    (alloc / 1024).toFixed(2) + " GB allocated of a " + (limitMb / 1024).toFixed(2) +
+    " GB budget  (" + (total / 1024).toFixed(2) + " GB physical)";
+
+  const last = d.last_generation;
+  const rows = [
+    ["model", d.model ? d.model.id.replace("dots-studio/", "") : "—"],
+    ["precision", d.model ? d.model.precision : "—"],
+    ["patch budget", d.model ? d.model.max_generate_length + " patches" : "—"],
+    ["steps", d.model ? d.model.default_num_steps : "—"],
+    ["uptime", d.uptime_seconds != null ? Math.round(d.uptime_seconds) + " s" : "—"],
+    ["requests", d.request_count],
+    ["lifetime peak", d.lifetime_peak_vram_mb
+      ? (d.lifetime_peak_vram_mb / 1024).toFixed(2) + " GB" : "—"],
+  ];
+  if (last) {
+    rows.push(["last audio", last.audio_seconds + " s"]);
+    rows.push(["last RTF", last.rtf != null ? last.rtf.toFixed(3) : "—"]);
+    rows.push(["last speed", last.speed_factor ? last.speed_factor.toFixed(2) + "x" : "—"]);
+  } else {
+    rows.push(["last audio", "no requests yet"]);
+  }
+  $("telemetry").innerHTML = rows
+    .map(r => "<dt>" + r[0] + "</dt><dd>" + escapeHtml(String(r[1])) + "</dd>").join("");
+}
+
+/* ---------------------------------------------------------------- speakers */
+async function loadSpeakers() {
+  try {
+    const res = await fetch("v1/speakers", { cache: "no-store" });
+    const data = await res.json();
+    speakers = data.data || [];
+  } catch (err) {
+    speakers = [];
+  }
+  renderSpeakers();
+  renderBudget();
+}
+
+function renderSpeakers() {
+  const list = $("speakerList");
+  const sel = $("speaker");
+  const keep = sel.value;
+
+  list.innerHTML = speakers.length
+    ? speakers.map(s =>
+        '<li><span>' + escapeHtml(s.id) +
+        '<span class="meta"> ' + s.duration_seconds + "s &middot; " + s.requests + " uses</span></span>" +
+        '<button class="ghost" data-del="' + escapeHtml(s.id) +
+        '" style="margin:0;padding:3px 10px;font-size:12px">delete</button></li>')
+      .join("")
+    : '<li class="meta">none yet</li>';
+
+  sel.innerHTML = '<option value="">&mdash; no voice registered &mdash;</option>' +
+    speakers.map(s => '<option value="' + escapeHtml(s.id) + '">' +
+      escapeHtml(s.id) + " (" + s.duration_seconds + "s)</option>").join("");
+  if (speakers.some(s => s.id === keep)) sel.value = keep;
+}
+
+$("speakerList").addEventListener("click", async (ev) => {
+  const id = ev.target.getAttribute("data-del");
+  if (!id) return;
+  try {
+    await fetch("v1/speakers/" + encodeURIComponent(id), { method: "DELETE" });
+    loadSpeakers();
+  } catch (err) { /* surfaced on the next poll */ }
+});
+
+/* ---------------------------------------------------------------- register */
+$("regBtn").addEventListener("click", async () => {
+  const file = $("regFile").files[0];
+  const text = $("regText").value.trim();
+  const note = $("regStatus");
+  note.className = "note";
+  if (!file) { note.className = "note err"; note.textContent = "Choose a WAV first."; return; }
+  if (!text) { note.className = "note err"; note.textContent = "A transcript is required."; return; }
+
+  const body = new FormData();
+  body.append("reference_audio", file, file.name);
+  body.append("reference_text", text);
+  if ($("regId").value.trim()) body.append("speaker_id", $("regId").value.trim());
+
+  $("regBtn").disabled = true;
+  note.textContent = "registering…";
+  try {
+    const res = await fetch("v1/speakers/register", { method: "POST", body });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || ("HTTP " + res.status));
+    note.className = "note ok";
+    note.textContent = "registered '" + data.id + "' (" + data.duration_seconds + " s)";
+    $("regFile").value = ""; $("regText").value = ""; $("regId").value = "";
+    await loadSpeakers();
+    $("speaker").value = data.id;
+    renderBudget();
+  } catch (err) {
+    note.className = "note err"; note.textContent = String(err.message || err);
+  } finally {
+    $("regBtn").disabled = false;
+  }
+});
+
+/* ----------------------------------------------------------------- budget */
+/* Mirrors resolve_max_words() in scripts/process_txt.py: subtract the reference
+   prompt's patches from the total budget, convert what is left to seconds, then
+   to words. Past that the request would be rejected or silently truncated, so
+   the page refuses instead. A one-off upload has no known length, so the budget
+   is only enforced for a registered voice. */
+function wordBudget() {
+  if (!health || !health.model) return null;
+  const sel = speakers.find(s => s.id === $("speaker").value);
+  if (!sel) return null;
+  const patch = health.model.audio_patch_seconds || 0.16;
+  const free = health.model.max_generate_length - Math.ceil(sel.duration_seconds / patch);
+  if (free <= 1) return 0;
+  return Math.min(CHUNK_MAX_WORDS, Math.floor(free * patch * WORDS_PER_SECOND));
+}
+
+function renderBudget() {
+  const el = $("budget");
+  const words = wordBudget();
+  const used = $("text").value.trim().split(/\s+/).filter(Boolean).length;
+  if (words == null) { el.className = "note"; el.textContent = ""; return; }
+  if (words === 0) {
+    el.className = "note err";
+    el.textContent = "This reference leaves no room in the patch budget to generate.";
+    return;
+  }
+  el.className = used > words ? "note err" : "note";
+  el.textContent = used + " / ~" + words + " words for this voice" +
+    (used > words
+      ? " — over budget, this would be truncated. Use scripts/process_txt.py for long text."
+      : "");
+}
+
+/* ------------------------------------------------------------------ synth */
+let controller = null;
+
+$("go").addEventListener("click", async () => {
+  const text = $("text").value.trim();
+  const status = $("status");
+  const speakerId = $("speaker").value;
+  const file = $("advFile").files[0];
+  const advText = $("advText").value.trim();
+
+  if (!text) { status.className = "note err"; status.textContent = "Enter some text."; return; }
+  if (!speakerId && !file) {
+    status.className = "note err";
+    status.textContent = "Select a registered voice, or upload a reference under Advanced.";
+    return;
+  }
+  if (!speakerId && !advText) {
+    status.className = "note err";
+    status.textContent = "The one-off reference needs its transcript.";
+    return;
+  }
+  const words = wordBudget();
+  if (words != null && text.split(/\s+/).length > words) {
+    status.className = "note err";
+    status.textContent = "Too long for one request (max ~" + words +
+      " words here). Use scripts/process_txt.py for long text.";
+    return;
+  }
+
+  const body = new FormData();
+  body.append("text", text);
+  // Ask for the JSON envelope so audio and metrics arrive together, rather than
+  // reading X-* headers off a binary body.
+  body.append("include_metrics", "true");
+  if (speakerId) {
+    body.append("speaker_id", speakerId);
+  } else {
+    body.append("reference_audio", file, file.name);
+    body.append("reference_text", advText);
+  }
+
+  controller = new AbortController();
+  $("go").disabled = true; $("stop").disabled = false;
+  status.className = "note";
+  status.textContent = "generating…";
+
+  try {
+    const res = await fetch("v1/audio/speech", { method: "POST", body, signal: controller.signal });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || ("HTTP " + res.status));
+
+    const bytes = Uint8Array.from(atob(data.audio_base64), c => c.charCodeAt(0));
+    const player = $("player");
+    if (player.dataset.url) URL.revokeObjectURL(player.dataset.url);
+    const url = URL.createObjectURL(new Blob([bytes], { type: "audio/wav" }));
+    player.dataset.url = url;
+    player.src = url;
+
+    const m = data.metrics || {};
+    status.className = "note ok";
+    status.textContent = "done — " + m.audio_seconds + " s audio in " +
+      m.wall_seconds + " s (rtf " + (m.rtf != null ? m.rtf.toFixed(3) : "—") +
+      ", peak " + (m.peak_vram_allocated_mb || "—") + " MB)";
+    loadSpeakers();
+  } catch (err) {
+    if (err.name === "AbortError") { status.className = "note"; status.textContent = "cancelled."; }
+    else { status.className = "note err"; status.textContent = String(err.message || err); }
+  } finally {
+    $("go").disabled = false; $("stop").disabled = true; controller = null;
+  }
+});
+
+$("stop").addEventListener("click", () => { if (controller) controller.abort(); });
+$("text").addEventListener("input", renderBudget);
+$("speaker").addEventListener("change", renderBudget);
+
+pollHealth();
+loadSpeakers();
+setInterval(pollHealth, 2000);
+</script>
+</body>
+</html>

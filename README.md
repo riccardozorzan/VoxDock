@@ -47,8 +47,31 @@ The transcripts under `data/references/` and `data/input/` are committed, but
 and large. Record your own reference; everything else works unchanged. For
 continuation cloning the transcript must match the audio word for word.
 
-Then open <http://127.0.0.1:8000/docs> for the OpenAPI UI and
+Then open <http://127.0.0.1:8000/docs> for the OpenAPI UI,
+**<http://127.0.0.1:8000/ui> for a usable web interface**, and
 `data/output/benchmark_report.json` for the benchmark verdict.
+
+### The web UI (`/ui`)
+
+A single self-contained HTML page — no build step, no Node, no second service —
+that drives the same public API. It lets you register a voice, pick it from a
+dropdown (so the clip is not re-uploaded per request), type text and play the
+result, and watch VRAM, RTF and request count live. The VRAM bar is drawn
+against the **configured budget**, not the physical total, because keeping
+allocations under that line is what `app/patches.py` exists for.
+
+Long text is refused rather than silently truncated: the page mirrors
+`resolve_max_words()` from `process_txt.py` and points you at the CLI, which
+chunks and stitches properly.
+
+It has **no authentication of its own** — it is a client for an API that also
+has none. The port is published on `127.0.0.1` by default for that reason; do
+not change `TTS_BIND_HOST` without putting something in front of it.
+
+> The page is verified by hand, not by the test suite. `tests/test_ui.py` checks
+> what breaks *silently* — endpoint paths, DOM ids, escaping — but exercising
+> the actual flows needs a browser and a GPU, which the host-side suite has
+> neither of.
 
 `process_txt.py` needs no flags to get the full v3 behaviour: it registers the
 voice once and reuses the id, inserts 300 ms between chunks, normalises the
@@ -87,21 +110,36 @@ re-downloaded.
 ```text
 .
 ├── Dockerfile                 # CUDA 12.8 runtime + torch cu128 + dots.tts
-├── docker-compose.yml         # GPU reservation, port 8000, hf_cache volume
+├── docker-compose.yml         # GPU reservation, non-root user, 3 volumes
 ├── .env.example               # every tunable (copied to .env)
 ├── requirements.txt
+├── pytest.ini
 ├── app/
 │   ├── config.py              # settings: env -> best_config.json -> defaults
 │   ├── patches.py             # low-VRAM patches for dots.tts (6 GB cards)
 │   ├── speakers.py            # speaker registry (register once, reuse by id)
 │   ├── utils.py               # GPU telemetry, WAV buffers, temp files
+│   ├── static/index.html      # the /ui web page (self-contained, no build)
 │   └── main.py                # FastAPI service + dots.tts runtime loader
 ├── scripts/
 │   ├── clean_audio.py         # denoise + validate the reference clip
 │   ├── process_txt.py         # chunk -> POST -> FFmpeg concat -> loudnorm
 │   ├── benchmark_test.py      # cold start / peak VRAM / RTF benchmark
-│   ├── autotune.py            # sweep model/precision/settings -> best_config.json
-│   └── test_api.py            # one-shot sanity check
+│   ├── autotune.py            # sweep settings -> best_config.json
+│   ├── speaker_similarity.py  # ECAPA-TDNN cosine similarity vs a reference
+│   ├── profile_request.py     # attribute the per-request fixed cost
+│   ├── latency_report.py      # cold start / first request / steady state
+│   ├── check_identity.py      # assert compose matches app/__init__.py
+│   └── test_api.py            # smoke test; --assert for CI
+├── tests/                     # 109 host-side tests, no GPU needed (~0.1 s)
+│   ├── conftest.py            # fixtures: isolated env, reloadable config
+│   ├── test_config.py         # the three-tier settings chain
+│   ├── test_speakers.py       # registry CRUD + path-traversal defence
+│   ├── test_process_txt.py    # chunking, OOM split ordering, loudnorm parsing
+│   ├── test_autotune.py       # the winning-profile artefact
+│   ├── test_patches.py        # the low-VRAM patch guard
+│   ├── test_api_smoke.py      # the --assert smoke test
+│   └── test_ui.py             # /ui asset: endpoints, DOM ids, escaping
 └── data/
     ├── references/            # raw reference .wav + transcript .txt
     ├── speakers/              # registered voices (id -> .wav + .txt), gitignored
