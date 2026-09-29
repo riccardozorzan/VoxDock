@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import math
 import time
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
@@ -35,8 +36,14 @@ from app.security import (
     SCOPE_TTS,
     ApiError,
     QueueGate,
+    build_provenance,
+    provenance_headers,
     RateLimiter,
+    check_generation_budget,
+    check_reference_duration,
+    check_text_length,
     client_principal,
+    estimate_generation_seconds,
     error_body,
     evaluate_exposure,
     extract_credential,
@@ -55,6 +62,7 @@ from app.utils import (
     resolve_precision,
     safe_filename,
     temp_file_path,
+    wav_duration_from_bytes,
     tensor_to_wav_bytes,
     wav_duration_seconds,
 )
@@ -309,6 +317,21 @@ def _refusal(request: Request, error: ApiError, auth_label: str = "") -> JSONRes
     return _error(request, error)
 
 
+def _refuse_if(request: Request, error: Optional[ApiError]) -> None:
+    """Raise a rendered refusal if a cap check produced one.
+
+    The cap rules in ``app.security`` return ``None`` or an :class:`ApiError`
+    rather than raising, so each one is a plain function that a test can call
+    with three arguments. This is the only place that turns a non-None into an
+    HTTP response, which is what keeps the "refuse, log, and answer in the
+    documented envelope" behaviour identical for every cap.
+    """
+    if error is not None:
+        raise _Refused(
+            _refusal(request, error, getattr(request.state, "auth_label", "") or "")
+        )
+
+
 def require_scope(scope: str):
     """Build a FastAPI dependency that demands one scope.
 
@@ -325,7 +348,7 @@ def require_scope(scope: str):
         if request.url.path in PUBLIC_PATHS:
             return None
         sec = settings.security
-        presented = extract_credential(authorization, x_api_key)
+        presented = extract_credential(authorization, x_api_key, sec.allow_bearer)
         auth = verify_key(presented, sec.api_keys, scope)
 
         if not auth.ok:
@@ -846,6 +869,17 @@ async def register_speaker(
             detail=f"'reference_audio' exceeds {settings.api.max_upload_mb} MB.",
         )
 
+    # Measured from the bytes, before anything is written: a clip rejected
+    # after it has been stored would leave a WAV on disk that the caller was
+    # told it could not use.
+    _refuse_if(
+        request,
+        check_reference_duration(
+            wav_duration_from_bytes(payload) or 0.0,
+            settings.security.max_reference_seconds,
+        ),
+    )
+
     registry = _registry(request)
     _check_speaker_capacity(request, registry, speaker_id, overwrite)
 
@@ -897,6 +931,31 @@ async def register_speaker(
             record.id,
         )
     return {"object": "speaker", **data}
+
+
+def _available_audio_seconds(request: Request, reference_seconds: float) -> float:
+    """How many seconds of audio this request could actually produce.
+
+    The patch budget is the real constraint, and it is shared: one patch is
+    ~160 ms of audio, ``max_generate_length`` patches cover the reference
+    prompt *and* the generated audio, and the 6 GB card is what forces that
+    number. So the room left for generation is the budget minus the prompt -
+    which is the same subtraction ``scripts/process_txt.py`` does to size its
+    chunks, so the pipeline and the service agree on what fits.
+
+    ``max_audio_seconds`` is the operator-facing ceiling on top of that, and the
+    smaller of the two wins. Falls back to the documented 160 ms patch when the
+    runtime has not reported its own, so the cap still applies during startup.
+    """
+    info = getattr(request.app.state, "runtime_info", None) or {}
+    patch_seconds = float(
+        info.get("patch_seconds") or (settings.model.max_sequence_length and 0.16) or 0.16
+    )
+    total_patches = settings.model.max_generate_length
+    prompt_patches = int(math.ceil(reference_seconds / patch_seconds)) if patch_seconds else 0
+    available = max(0.0, (total_patches - prompt_patches) * patch_seconds)
+    limit = settings.security.max_audio_seconds
+    return available if not limit else min(available, limit)
 
 
 def _check_speaker_capacity(
@@ -1025,25 +1084,12 @@ async def create_speech(
     runtime = _require_runtime(request)
 
     cleaned_text = (text or "").strip()
-    max_chars = settings.security.max_text_chars
-    if max_chars and len(cleaned_text) > max_chars:
-        # Refused here rather than deeper in, where the failure is an OOM: the
-        # 128-patch budget at 160 ms is ~20 s of audio, and a text long enough
-        # to blow past it is a client bug worth naming precisely.
-        raise _Refused(
-            _refusal(
-                request,
-                ApiError(
-                    413,
-                    "TEXT_TOO_LONG",
-                    f"'text' is {len(cleaned_text)} characters; the limit is "
-                    f"{max_chars}. Split it into chunks, or run "
-                    "scripts/process_txt.py which sizes them to the VRAM budget.",
-                    retryable=False,
-                ),
-                getattr(request.state, "auth_label", "") or "",
-            )
-        )
+    # Refused here rather than deeper in, where the failure is an OOM: the
+    # 128-patch budget at 160 ms is ~20 s of audio, and a text long enough to
+    # blow past it is a client bug worth naming precisely.
+    _refuse_if(
+        request, check_text_length(cleaned_text, settings.security.max_text_chars)
+    )
     if not cleaned_text:
         # Defence in depth: FastAPI's form validation rejects an empty or
         # whitespace-only `text` before the route body runs, so a client sending
@@ -1096,11 +1142,42 @@ async def create_speech(
                 status_code=413,
                 detail=f"'reference_audio' exceeds {settings.api.max_upload_mb} MB.",
             )
+        _refuse_if(
+            request,
+            check_reference_duration(
+                wav_duration_from_bytes(payload) or 0.0,
+                settings.security.max_reference_seconds,
+            ),
+        )
         prompt_suffix = Path(
             safe_filename(reference_audio.filename or "reference.wav")
         ).suffix
         prompt_wav = None  # written to a temp file below
         prompt_text = cleaned_prompt_text
+
+    # How long the prompt actually is, needed *before* generating: the prompt
+    # consumes patches out of the same 128-patch budget as the output, so a
+    # long reference leaves less room for the audio.
+    reference_seconds = (
+        wav_duration_from_bytes(payload) or 0.0
+        if prompt_wav is None
+        else wav_duration_seconds(prompt_wav)
+    )
+
+    # --- will the result fit? ------------------------------------------------ #
+    # Computed from the same patch arithmetic the VRAM budget is built on, and
+    # refused *before* the GPU is touched. Generating first and discovering the
+    # answer afterwards costs the generation and ends in an OOM rather than in
+    # a message the client can act on.
+    _refuse_if(
+        request,
+        check_generation_budget(
+            estimate_generation_seconds(
+                len(cleaned_text), settings.processing.words_per_second
+            ),
+            _available_audio_seconds(request, reference_seconds),
+        ),
+    )
 
     # --- parameter resolution (spec Task 3.3 defaults: 10 steps / CFG 1.2) ---
     effective_num_steps = (
@@ -1185,6 +1262,16 @@ async def create_speech(
     metrics = outcome["metrics"]
     wav_bytes = tensor_to_wav_bytes(outcome["audio"], outcome["sample_rate"])
 
+    provenance = build_provenance(
+        request_id=str(metrics.get("request_id") or ""),
+        model=settings.model.model_name_or_path,
+        text=cleaned_text,
+        audio_seconds=float(metrics.get("audio_seconds") or 0.0),
+        sample_rate=outcome["sample_rate"],
+        speaker_id=record.id if record is not None else None,
+        consent_status=record.consent_status if record is not None else None,
+    )
+
     if include_metrics:
         return JSONResponse(
             status_code=200,
@@ -1194,7 +1281,12 @@ async def create_speech(
                 "sample_rate": outcome["sample_rate"],
                 "audio_base64": base64.b64encode(wav_bytes).decode("ascii"),
                 "metrics": metrics,
+                # What produced this audio, so a file kept without its request
+                # can still be traced. See app/security.py on why this is a
+                # record and not a watermark.
+                "provenance": provenance,
             },
+            headers=provenance_headers(provenance),
         )
 
     headers = {
@@ -1217,6 +1309,9 @@ async def create_speech(
         "X-Sample-Rate": str(outcome["sample_rate"]),
         "Content-Disposition": 'attachment; filename="speech.wav"',
         "Cache-Control": "no-store",
+        # Provenance rides on the raw audio too: a client that saves the WAV and
+        # loses the JSON still has a record of what produced it.
+        **provenance_headers(provenance),
     }
     return Response(content=wav_bytes, media_type="audio/wav", headers=headers)
 

@@ -209,14 +209,22 @@ def parse_api_keys(raw: Optional[str]) -> tuple[APIKey, ...]:
 _SCHEME_PATTERN = re.compile(r"^\s*(\w+)\s+(.+?)\s*$", re.IGNORECASE)
 
 
-def extract_credential(authorization: Optional[str], api_key: Optional[str]) -> str:
+def extract_credential(
+    authorization: Optional[str], api_key: Optional[str], allow_bearer: bool = True
+) -> str:
     """Pull the presented secret out of the request headers.
 
     Accepts ``Authorization: Bearer <key>`` and ``X-API-Key: <key>``. Parsing
     happens here so the rest of the module deals in plain strings and stays
     testable without an ASGI request object.
+
+    ``allow_bearer=False`` ignores the ``Authorization`` header entirely, for an
+    operator whose reverse proxy already terminates auth and who wants the
+    service to accept nothing but the dedicated header. It is defence in depth,
+    not a security boundary: both headers carry the same secret, and anyone who
+    can send one can send the other.
     """
-    if authorization:
+    if authorization and allow_bearer:
         match = _SCHEME_PATTERN.match(authorization)
         if not match:
             return ""
@@ -224,6 +232,10 @@ def extract_credential(authorization: Optional[str], api_key: Optional[str]) -> 
         if scheme not in {"bearer", "token"}:
             return ""
         return value
+    if authorization and not allow_bearer:
+        # Present but ignored: fall through to X-API-Key rather than treating a
+        # disabled scheme as a malformed credential.
+        pass
     return (api_key or "").strip()
 
 
@@ -733,3 +745,190 @@ def evaluate_exposure(
             "risk explicitly (documented in README section 6)."
         ),
     )
+
+
+# --------------------------------------------------------------------------- #
+#  Input and budget caps
+#
+#  These are here, rather than inline in the routes, for the same reason as
+#  everything else in this file: a cap that can only be exercised by starting a
+#  6 GB service is a cap that quietly stops existing. They also caught a real
+#  defect - TTS_MAX_REFERENCE_SECONDS and TTS_MAX_AUDIO_SECONDS were documented
+#  in the README and .env.example and read by app/config.py, and nothing
+#  enforced either of them. A knob that does nothing is worse than no knob,
+#  because the operator believes it is protected.
+# --------------------------------------------------------------------------- #
+
+#: Characters per word when estimating how long a text will take to speak.
+#: Deliberately generous: the estimate exists to catch a request that obviously
+#: cannot fit, so a wrong guess must fail towards *allowing* the request rather
+#: than rejecting text the engine would have handled.
+CHARS_PER_WORD = 6.0
+
+
+def estimate_generation_seconds(
+    text_chars: int, words_per_second: float, chars_per_word: float = CHARS_PER_WORD
+) -> float:
+    """Roughly how long ``text_chars`` will take to speak.
+
+    The same ``words_per_second`` the chunker in ``scripts/process_txt.py`` uses,
+    so the service's idea of "a chunk that fits" and the pipeline's agree. It is
+    an estimate, not a measurement: the real duration depends on the model, the
+    voice and the prosody. Used only to refuse work that clearly will not fit.
+    """
+    if words_per_second <= 0:
+        return 0.0
+    return (max(0, text_chars) / max(1.0, chars_per_word)) / words_per_second
+
+
+def check_reference_duration(
+    seconds: float, limit: float, *, api_field: str = "reference_audio"
+) -> Optional[ApiError]:
+    """Refuse a reference clip longer than ``limit``. 0 disables.
+
+    Checked on the clip's real duration rather than its size, because those
+    diverge wildly: 20 s of 48 kHz stereo is 4 MB and 20 s of 8 kHz mono is
+    320 kB. A byte cap would have to be set for the worst case and would then
+    reject perfectly good 16 kHz references.
+    """
+    if not limit or seconds <= limit:
+        return None
+    return ApiError(
+        413,
+        "REFERENCE_TOO_LONG",
+        f"'{api_field}' is {seconds:.1f}s long; the limit is {limit:g}s. A "
+        "continuation reference works best at 5-15 s, and the 128-patch budget "
+        "leaves no room for a longer prompt on a 6 GB card.",
+        retryable=False,
+    )
+
+
+def check_generation_budget(
+    estimated_seconds: float, limit: float
+) -> Optional[ApiError]:
+    """Refuse a request whose estimated output overruns the budget.
+
+    Refused *before* generation, not after: the alternative is spending the
+    GPU's time producing audio that cannot be returned, and on a 6 GB card the
+    failure is an OOM rather than a tidy error. The message names the measured
+    budget, because "too long" with no number is not actionable.
+    """
+    if not limit or estimated_seconds <= limit:
+        return None
+    return ApiError(
+        413,
+        "TEXT_TOO_LONG",
+        f"this text would generate about {estimated_seconds:.0f}s of audio; "
+        f"the limit is {limit:g}s (the 128-patch VRAM budget). Split it into "
+        "chunks, or run scripts/process_txt.py which sizes them to the budget.",
+        retryable=False,
+    )
+
+
+def check_text_length(text: str, limit: int) -> Optional[ApiError]:
+    """Refuse absurd input before it reaches the engine or the logs."""
+    if not limit or len(text) <= limit:
+        return None
+    return ApiError(
+        413,
+        "TEXT_TOO_LONG",
+        f"'text' is {len(text)} characters; the limit is {limit}. Split it into "
+        "chunks, or run scripts/process_txt.py which sizes them to the VRAM budget.",
+        retryable=False,
+    )
+
+
+# --------------------------------------------------------------------------- #
+#  Provenance
+#
+#  TODO P0 asks for "clearly identify generated audio". The honest version of
+#  that is a record of *what produced this file* that travels with the file:
+#  headers for a human or a tool that only has the WAV, and a block in the JSON
+#  envelope for a client that kept it.
+#
+#  What is deliberately NOT here: a watermark. Audible or forensic marking of
+#  generated speech is a research problem with a real literature (AudioSeal and
+#  successors), and it is a property of the *audio samples*, not of an HTTP
+#  header. A header is trivially stripped by re-encoding; pretending otherwise
+#  would be worse than not claiming it. The honest statement is in the README:
+#  this identifies the file, it does not make the audio self-describing.
+# --------------------------------------------------------------------------- #
+
+#: Emitted on every synthesis response and recorded in /health.
+GENERATOR = "VoxDock"
+
+
+def text_fingerprint(text: str) -> str:
+    """SHA-256 of the synthesised text, truncated.
+
+    Lets an operator tie a specific output back to a specific input - "which of
+    yesterday's requests produced this file?" - without storing the text
+    itself. A hash of someone's words is still a fingerprint of those words, so
+    this is deliberately one-way and truncated; it identifies a request, it does
+    not recover it.
+    """
+    import hashlib
+
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def build_provenance(
+    *,
+    request_id: str,
+    model: str,
+    text: str,
+    audio_seconds: float,
+    sample_rate: int,
+    speaker_id: Optional[str] = None,
+    consent_status: Optional[str] = None,
+    reference_text_sha256: Optional[str] = None,
+) -> dict[str, Any]:
+    """The record of what generated this audio.
+
+    ``consent_status`` is here on purpose. Provenance that cannot answer "was
+    this voice cloned with permission?" answers the easy half of the abuse
+    question and not the hard half, and the hard half is the one anyone
+    investigating a clip will ask first.
+    """
+    return {
+        "generator": GENERATOR,
+        "version": _service_version(),
+        "model": model,
+        "request_id": request_id,
+        "text_sha256": text_fingerprint(text),
+        "reference_sha256": reference_text_sha256,
+        "speaker_id": speaker_id,
+        "consent_status": consent_status,
+        "audio_seconds": round(audio_seconds, 3),
+        "sample_rate": sample_rate,
+    }
+
+
+def _service_version() -> str:
+    """``app.__version__``, read lazily to keep this module import-free."""
+    from app import __version__
+
+    return __version__
+
+
+def provenance_headers(provenance: dict[str, Any]) -> dict[str, str]:
+    """The same record as HTTP headers, for a client that only kept the WAV.
+
+    Short and ASCII-only, because a header is not a place for a long document.
+    Anything absent is simply omitted rather than sent empty, so a client
+    testing for the header's presence is not misled.
+    """
+    headers = {
+        "X-VoxDock-Generator": str(provenance.get("generator") or ""),
+        "X-VoxDock-Version": str(provenance.get("version") or ""),
+        "X-VoxDock-Model": str(provenance.get("model") or ""),
+        "X-Text-SHA256": str(provenance.get("text_sha256") or ""),
+    }
+    for name, key in (
+        ("X-Speaker-Id", "speaker_id"),
+        ("X-Consent-Status", "consent_status"),
+    ):
+        value = provenance.get(key)
+        if value:
+            headers[name] = str(value)
+    return headers

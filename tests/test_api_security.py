@@ -544,3 +544,123 @@ def test_a_malformed_speaker_id_is_a_400_not_a_500(tmp_path):
 
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "INVALID_SPEAKER"
+
+
+# --------------------------------------------------------------------------- #
+#  Caps that were documented but did nothing
+#
+#  TTS_MAX_REFERENCE_SECONDS and TTS_MAX_AUDIO_SECONDS were in the README, in
+#  .env.example and in app/config.py, and nothing read them. These tests are the
+#  reason that is no longer true; tests/test_limits_enforced.py stops it
+#  recurring.
+# --------------------------------------------------------------------------- #
+def long_wav(seconds: float, sample_rate: int = 48000) -> bytes:
+    """A real, silent WAV of a given length - long, but genuinely decodable."""
+    import io
+    import wave
+
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(sample_rate)
+        handle.writeframes(b"\x00\x00" * int(seconds * sample_rate))
+    return buffer.getvalue()
+
+
+def test_an_over_long_reference_is_refused_at_registration(tmp_path):
+    configure_security(api_keys=parse_api_keys(KEYS), max_reference_seconds=2.0)
+    test_client = build_client(tmp_path)
+
+    response = test_client.post(
+        "/v1/speakers/register",
+        files={"reference_audio": ("long.wav", long_wav(5.0), "audio/wav")},
+        data={"reference_text": "one two three", "speaker_id": "toolong"},
+        headers=auth(SPEAKERS_KEY),
+    )
+
+    assert response.status_code == 413
+    assert response.json()["error"]["code"] == "REFERENCE_TOO_LONG"
+
+
+def test_a_refused_reference_is_not_left_on_disk(tmp_path):
+    """Rejected before the write, or the caller has a failure *and* the clip."""
+    configure_security(api_keys=parse_api_keys(KEYS), max_reference_seconds=2.0)
+    test_client = build_client(tmp_path)
+    register = test_client.post
+
+    register(
+        "/v1/speakers/register",
+        files={"reference_audio": ("long.wav", long_wav(5.0), "audio/wav")},
+        data={"reference_text": "one two three", "speaker_id": "toolong"},
+        headers=auth(SPEAKERS_KEY),
+    )
+
+    assert list((tmp_path / "speakers").glob("*.wav")) == []
+
+
+def test_a_reference_under_the_cap_is_accepted(tmp_path):
+    """Guard against an off-by-one that would refuse a legitimate recording."""
+    configure_security(api_keys=parse_api_keys(KEYS), max_reference_seconds=5.0)
+    test_client = build_client(tmp_path)
+
+    response = test_client.post(
+        "/v1/speakers/register",
+        files={"reference_audio": ("ok.wav", long_wav(4.0), "audio/wav")},
+        data={"reference_text": "one two three", "speaker_id": "fine"},
+        headers=auth(SPEAKERS_KEY),
+    )
+
+    assert response.status_code == 201
+
+
+def test_an_over_long_inline_reference_is_refused(tmp_path):
+    configure_security(api_keys=parse_api_keys(KEYS), max_reference_seconds=2.0)
+    test_client = build_client(tmp_path, runtime=object())
+
+    response = test_client.post(
+        "/v1/audio/speech",
+        files={"reference_audio": ("long.wav", long_wav(5.0), "audio/wav")},
+        data={"text": "hello", "reference_text": "one two three"},
+        headers=auth(TTS_KEY),
+    )
+
+    assert response.status_code == 413
+    assert response.json()["error"]["code"] == "REFERENCE_TOO_LONG"
+
+
+def test_text_that_cannot_fit_the_budget_is_refused_before_generation(tmp_path):
+    """The alternative is spending the GPU and then OOMing."""
+    configure_security(api_keys=parse_api_keys(KEYS), max_text_chars=100000)
+    test_client = build_client(tmp_path, runtime=object())
+    assert register_speaker(test_client).status_code == 201
+
+    response = test_client.post(
+        "/v1/audio/speech",
+        data={"text": "word " * 400, "speaker_id": "ref"},
+        headers=auth(TTS_KEY),
+    )
+
+    assert response.status_code == 413
+    body = response.json()["error"]
+    assert body["code"] == "TEXT_TOO_LONG"
+    assert "patch" in body["message"], "the message should name the real constraint"
+    # Refused before admission, so it did not take a queue slot either.
+    assert test_client.app.state.queue_gate.pending == 0
+
+
+def test_text_that_fits_is_left_alone(tmp_path):
+    """The cap must not refuse the work the pipeline actually sends."""
+    configure_security(api_keys=parse_api_keys(KEYS), max_text_chars=100000)
+    test_client = build_client(tmp_path, runtime=object())
+    assert register_speaker(test_client).status_code == 201
+
+    response = test_client.post(
+        "/v1/audio/speech",
+        data={"text": "this is a normal short sentence", "speaker_id": "ref"},
+        headers=auth(TTS_KEY),
+    )
+
+    # Not a 413: it got past the caps and on to the engine (which has no real
+    # torch behind it here, so the answer past this point is not the subject).
+    assert response.status_code != 413

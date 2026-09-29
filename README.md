@@ -147,7 +147,7 @@ re-downloaded.
 │   ├── test_api.py            # smoke test; --assert for CI
 │   ├── make_reference_set.py  # write the autotuner's reference_set.json
 │   └── fetch_dev_audio.py     # fetch the public ECAPA control clips
-├── tests/                     # 274 host-side tests, no GPU needed (~0.6 s)
+├── tests/                     # 309 host-side tests, no GPU needed (~0.6 s)
 │   ├── conftest.py            # fixtures: isolated env, reloadable config
 │   ├── test_config.py         # the three-tier settings chain
 │   ├── test_speakers.py       # registry CRUD + path-traversal defence
@@ -513,8 +513,8 @@ every start.
 | `TTS_MAX_QUEUE_SIZE` | `4` | in flight + waiting; beyond it `503` + `Retry-After` |
 | `TTS_MAX_SPEAKERS` | `50` | registered voices; `409` beyond it |
 | `TTS_MAX_TEXT_CHARS` | `2000` | request text; `413` beyond it |
-| `TTS_MAX_REFERENCE_SECONDS` | `20.0` | reference clip length |
-| `TTS_MAX_AUDIO_SECONDS` | `20.0` | generated audio length |
+| `TTS_MAX_REFERENCE_SECONDS` | `20.0` | reference clip length; `413` beyond it |
+| `TTS_MAX_AUDIO_SECONDS` | `20.0` | generated audio length; `413` beyond it |
 
 The `Retry-After` on a full queue is the **measured** generation time — an EWMA
 that replaces its startup estimate as soon as there is a real observation — so
@@ -522,6 +522,36 @@ the number quoted is one the client can actually trust. The text cap is set
 above what `scripts/process_txt.py` ever sends (35 words), so the long-form
 pipeline cannot trip it, while a client pasting a chapter gets a clear `413`
 instead of a generation that overruns the 20.5 s patch budget and OOMs.
+
+### Identifying generated audio
+
+Every synthesis response carries a record of what produced it, so a file that
+outlives its request is still traceable:
+
+```
+X-VoxDock-Generator: VoxDock      X-VoxDock-Version: 1.1.0
+X-VoxDock-Model: dots-studio/dots.tts-mf
+X-Text-SHA256: b133a0c0e9bee3be   X-Speaker-Id: riccardo
+X-Consent-Status: granted
+```
+
+`include_metrics=true` returns the same thing as a `provenance` object, with the
+full request id and audio duration. `X-Text-SHA256` is a truncated SHA-256 of
+the synthesised text: it identifies a request without storing or recovering
+anyone's words. `X-Consent-Status` is there because "was this voice cloned with
+permission?" is the first question anyone investigating a clip will ask, and
+provenance that cannot answer it only answers the easy half.
+
+**This is a record, not a watermark.** The headers travel with the file over
+HTTP and are gone the moment it is re-encoded — a detector looking for them
+finds nothing in an MP3. Marking the audio itself is a real research problem
+(AudioSeal and its successors do this at the sample level) and is *not* what
+this implements. Claiming otherwise would be worse than saying nothing, so
+`TODO/todo.md` leaves "investigate audio watermarking" unchecked: it needs a
+model, an evaluation of whether it survives this engine's vocoder, and a
+decision about whether the quality cost is acceptable. Until then, treat
+`data/output/*.wav` from a VoxDock install as *your* record of what you
+generated, which is what the logs and the metrics are for.
 
 ### Behind a reverse proxy
 

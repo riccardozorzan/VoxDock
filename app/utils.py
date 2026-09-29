@@ -301,6 +301,26 @@ def wav_duration_seconds(path: str | os.PathLike[str]) -> float:
         return handle.getnframes() / float(frame_rate)
 
 
+def wav_duration_from_bytes(payload: bytes) -> Optional[float]:
+    """Duration of an in-memory PCM WAV, or ``None`` if it is not one.
+
+    Exists so a duration cap can be applied *before* the clip is written to
+    disk: registering a voice and then deleting it because it was 40 s long
+    would leave the caller with a failure and the filesystem with the evidence
+    that they tried.
+
+    Returns ``None`` rather than raising for anything unparseable, because the
+    caller here is validating an upload and the registry's own decode step is
+    the right place to turn a broken file into a message.
+    """
+    try:
+        with contextlib.closing(wave.open(io.BytesIO(payload), "rb")) as handle:
+            frame_rate = handle.getframerate() or 1
+            return handle.getnframes() / float(frame_rate)
+    except (wave.Error, EOFError, ValueError):
+        return None
+
+
 # --------------------------------------------------------------------------- #
 #  Temporary files
 # --------------------------------------------------------------------------- #

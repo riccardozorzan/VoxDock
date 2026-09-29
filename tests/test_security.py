@@ -568,3 +568,161 @@ def test_an_empty_publish_address_is_treated_as_loopback():
 
 def test_an_empty_publish_address_with_keys_does_not_warn():
     assert evaluate_exposure(None, auth_enabled=True).warning is None
+
+
+# --------------------------------------------------------------------------- #
+#  Provenance
+# --------------------------------------------------------------------------- #
+def test_provenance_records_what_produced_the_audio():
+    from app.security import build_provenance
+
+    record = build_provenance(
+        request_id="abc123",
+        model="dots-studio/dots.tts-mf",
+        text="Questo e un test.",
+        audio_seconds=2.512,
+        sample_rate=48000,
+        speaker_id="riccardo",
+        consent_status="granted",
+    )
+
+    assert record["generator"] == "VoxDock"
+    assert record["request_id"] == "abc123"
+    assert record["model"] == "dots-studio/dots.tts-mf"
+    assert record["audio_seconds"] == 2.512
+    assert record["sample_rate"] == 48000
+
+
+def test_provenance_carries_the_consent_status():
+    """The hard half of any abuse question: was this voice permitted?"""
+    from app.security import build_provenance
+
+    permitted = build_provenance(
+        request_id="a", model="m", text="t", audio_seconds=1.0, sample_rate=48000,
+        consent_status="granted",
+    )
+    inline = build_provenance(
+        request_id="b", model="m", text="t", audio_seconds=1.0, sample_rate=48000
+    )
+
+    assert permitted["consent_status"] == "granted"
+    assert inline["consent_status"] is None, (
+        "an inline upload has no registered voice, and saying so honestly beats "
+        "implying consent"
+    )
+
+
+def test_the_text_fingerprint_is_stable_and_one_way():
+    from app.security import text_fingerprint
+
+    first = text_fingerprint("Questo e un test.")
+    assert first == text_fingerprint("Questo e un test.")
+    assert first != text_fingerprint("Questo e un altro test.")
+    assert len(first) == 16
+    assert "Questo" not in first, "the fingerprint must not leak the text"
+
+
+def test_identical_text_gives_an_identical_fingerprint():
+    """That is the point: it is a lookup key for a request, not a nonce."""
+    from app.security import text_fingerprint
+
+    assert text_fingerprint("same") == text_fingerprint("same")
+
+
+def test_provenance_headers_omit_what_is_unknown():
+    """A client testing for a header's presence must not be misled by an empty one."""
+    from app.security import build_provenance, provenance_headers
+
+    inline = provenance_headers(
+        build_provenance(
+            request_id="a", model="m", text="t", audio_seconds=1.0, sample_rate=48000
+        )
+    )
+
+    assert "X-Speaker-Id" not in inline
+    assert "X-Consent-Status" not in inline
+    assert inline["X-VoxDock-Generator"] == "VoxDock"
+    assert inline["X-Text-SHA256"]
+
+
+def test_provenance_headers_are_ascii_and_header_safe():
+    """A model name or text hash with a newline would split the header."""
+    from app.security import provenance_headers
+
+    headers = provenance_headers(
+        {
+            "generator": "VoxDock",
+            "version": "1.1.0",
+            "model": "dots-studio/dots.tts-mf",
+            "text_sha256": "abc",
+            "speaker_id": "riccardo",
+            "consent_status": "granted",
+        }
+    )
+
+    for name, value in headers.items():
+        assert "\n" not in value and "\r" not in value, name
+        assert value.isascii(), name
+
+
+# --------------------------------------------------------------------------- #
+#  Input and budget caps
+# --------------------------------------------------------------------------- #
+def test_a_reference_within_the_cap_is_allowed():
+    from app.security import check_reference_duration
+
+    assert check_reference_duration(7.0, 20.0) is None
+
+
+def test_an_over_long_reference_is_refused_with_the_numbers():
+    from app.security import check_reference_duration
+
+    error = check_reference_duration(45.0, 20.0)
+
+    assert error is not None
+    assert error.status == 413
+    assert error.code == "REFERENCE_TOO_LONG"
+    assert "45" in error.message and "20" in error.message
+    assert error.is_retryable is False
+
+
+def test_a_zero_limit_disables_the_reference_cap():
+    from app.security import check_reference_duration
+
+    assert check_reference_duration(600.0, 0) is None
+
+
+def test_the_generation_budget_names_the_real_constraint():
+    from app.security import check_generation_budget
+
+    error = check_generation_budget(90.0, 20.0)
+
+    assert error is not None
+    assert error.code == "TEXT_TOO_LONG"
+    assert "patch" in error.message, "the VRAM budget is the actual reason"
+
+
+def test_the_generation_budget_allows_what_fits():
+    from app.security import check_generation_budget
+
+    assert check_generation_budget(9.0, 20.0) is None
+    assert check_generation_budget(90.0, 0) is None, "0 disables"
+
+
+def test_the_text_cap_allows_what_fits():
+    from app.security import check_text_length
+
+    assert check_text_length("short", 2000) is None
+    assert check_text_length("x" * 2001, 2000) is not None
+    assert check_text_length("x" * 99999, 0) is None, "0 disables"
+
+
+def test_the_generation_estimate_scales_with_the_text():
+    from app.security import estimate_generation_seconds
+
+    short = estimate_generation_seconds(60, 2.5)
+    long = estimate_generation_seconds(600, 2.5)
+
+    assert long == pytest.approx(short * 10)
+    assert estimate_generation_seconds(60, 0) == 0.0, "no division by zero"
+    assert estimate_generation_seconds(-5, 2.5) == 0.0, "negative text is zero"
