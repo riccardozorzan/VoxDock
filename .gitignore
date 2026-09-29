@@ -19,8 +19,9 @@ data/references/controls/
 # Registered speaker prompts: the WAVs are covered by the *.wav rule above, but
 # the sidecar transcripts are personal too, so the whole store is ignored.
 data/speakers/
-# Downloaded model weights for scripts/speaker_similarity.py (ECAPA-TDNN, ~22 MB).
-# Machine-local and regenerable, like the HF checkpoint cache in the container.
+# Downloaded model weights for scripts/speaker_similarity.py (ECAPA-TDNN, ~22 M
+# parameters / ~85 MB on disk). Machine-local and regenerable, like the HF
+# checkpoint cache in the container.
 data/.speechbrain/
 
 # Generated audio is ignored, but the JSON reports are kept: they are small and
@@ -31,6 +32,13 @@ data/output/*.wav
 # consolidated result lives in data/output/tuning_report.json, which is tracked;
 # these 30+ intermediates are regenerable and only clutter the tree.
 data/output/tune_*.json
+# Run artefacts that are not evidence. autotune.py writes tuned.env on every run
+# (dry runs included) and process_txt.py writes <input>.report.json, so a run on
+# a new input would otherwise appear in `git status`. Ignore rules never apply to
+# files git already tracks, so the curated reports stay visible - re-add one that
+# was deleted with `git add -f`.
+data/output/tuned.env
+data/output/*.report.json
 
 # Python
 __pycache__/

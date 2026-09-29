@@ -661,6 +661,29 @@ handle it downstream.
 * **`benchmark_test.py`** reports the RTF in both conventions
   (`generation/audio` for the `< 0.5` target and `audio/generation` for the spec's
   literal formula) and exits non-zero when a threshold is violated.
+* **The tree stays clean while you run things.** Host runs only litter because
+  Python writes `__pycache__` next to the source and ruff writes `.ruff_cache`.
+  `export PYTHONPYCACHEPREFIX=/tmp/voxdock-pyc` moves the bytecode cache out of
+  the working tree entirely, and `ruff check --no-cache` does the same for lint,
+  so a run leaves `git status` showing nothing but your own untracked notes.
+  `.pytest_cache/` still appears but is ignored, and `pytest.ini` keeps
+  `cacheprovider` on purpose because `--lf` needs it. The container never had this
+  problem: the Dockerfile sets `PYTHONDONTWRITEBYTECODE=1`. The host suite needs
+  pytest, which the image does not carry — keep even that out of the tree with a
+  venv in `/tmp`:
+
+  ```bash
+  python3 -m venv /tmp/voxdock-venv
+  /tmp/voxdock-venv/bin/pip install pytest requests
+  PYTHONPYCACHEPREFIX=/tmp/voxdock-pyc /tmp/voxdock-venv/bin/python -m pytest -q
+  ```
+* **Never `git clean -X` here.** "Ignored" does not mean "disposable": the voice
+  recordings (`data/speakers/`, `data/references/*.wav`), the reference clips
+  (`data/input/ref_*.wav`) and the 85 MB ECAPA cache (`data/.speechbrain/`) are
+  ignored too, so a blanket clean deletes exactly the things that cannot be
+  re-downloaded. Run artefacts are ignored *by name* instead
+  (`data/output/tuned.env`, `data/output/*.report.json`), which keeps a run
+  invisible to `git status` without putting anything at risk.
 
 ---
 
