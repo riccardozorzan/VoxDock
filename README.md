@@ -450,6 +450,37 @@ other and to the two controls. The script always reports a self-similarity
 ceiling (1.0000 here) and accepts `--impostor` for the floor; without both, an
 absolute threshold would be meaningless.
 
+#### What 2 sampling steps actually costs
+
+`TTS_NUM_STEPS=2` was chosen for memory reasons alone — the DiT KV cache is
+sized by step count — so it is worth knowing what it trades. Both rows below
+are the same text, same reference and the same 128-patch budget; only the step
+count differs:
+
+| `TTS_NUM_STEPS` | similarity | long-form RTF | peak VRAM |
+|---|---:|---:|---:|
+| 2 (tuned default) | 0.7645 | **0.469** | **5458 MB** |
+| 4 | **0.7859** | 0.550 | 5518 MB |
+| — real same-speaker recording | 0.7146 | — | — |
+
+So doubling the steps buys **+0.021 cosine** for **+17 % generation time** and
+**+60 MB of VRAM**. Four steps does still fit at `max_generate_length=128` —
+the tuned `vocoder_chunk_patches=32` freed enough headroom that the KV cache
+doubles without an OOM, which the earlier notes assumed would not happen.
+
+Both configurations clear the real same-speaker recording, so the tuned default
+is not a quality compromise worth reversing. If voice fidelity matters more
+than throughput for a particular job, `TTS_NUM_STEPS=4` is now a viable choice
+on this card:
+
+```bash
+TTS_NUM_STEPS=4 docker compose up -d --force-recreate
+```
+
+Treat the +0.021 as indicative rather than precise: it is a single generation
+per configuration, and a difference this small is within the range where more
+samples would be needed to claim significance.
+
 ---
 
 ## 7. Operational notes

@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-09-29T08:12:46+00:00",
+  "timestamp": "2026-09-29T08:53:00+00:00",
   "model": "speechbrain/spkrec-ecapa-voxceleb",
   "reference": "data/references/my_voice_v2.wav",
   "reference_seconds": 14.914,
@@ -9,16 +9,16 @@
   },
   "generated": [
     {
-      "file": "data/output/test_audio_sample.wav",
-      "seconds": 48.52,
-      "similarity": 0.7583,
-      "relative_to_controls": 0.7595
+      "file": "data/output/steps4_128.wav",
+      "seconds": 49.96,
+      "similarity": 0.7859,
+      "relative_to_controls": 0.7869
     },
     {
-      "file": "data/output/test_api.wav",
-      "seconds": 3.36,
-      "similarity": 0.6392,
-      "relative_to_controls": 0.641
+      "file": "data/output/test_audio_sample.wav",
+      "seconds": 50.44,
+      "similarity": 0.7645,
+      "relative_to_controls": 0.7657
     },
     {
       "file": "data/references/my_voice_v1.wav",

@@ -1,10 +1,30 @@
 #!/usr/bin/env python3
-"""Quick sanity test for the running dots.tts API (spec Phase 1 / 6).
+"""Sanity test for the running dots.tts API (spec Phase 1 / 6).
 
 Checks ``/health`` and performs a single short synthesis request, saving the
 result to ``data/output/test_api.wav``.
 
     docker compose exec tts python scripts/test_api.py
+
+With ``--assert`` it additionally *verifies* the response rather than just
+printing it, and exits non-zero on the first failure - so it can be wired into
+CI or a post-deploy check. The default stays a human-readable smoke test,
+because that is what it was written as.
+
+What is asserted, and why each one:
+
+* HTTP 200 and a non-empty body - catches a route or exception-handling change.
+* the payload is a real RIFF/WAVE - a 200 carrying an error page in the body
+  would otherwise pass silently.
+* the duration is plausible for the text - catches a silent near-empty render,
+  which is the failure mode a status code cannot see.
+* ``X-Sample-Rate`` is the configured rate - catches a resampling regression.
+* ``X-Peak-Vram-MB`` is present and within the configured limit - the memory
+  patches exist to hold this line, so it is the one number worth gating on.
+
+The thresholds are deliberately loose. This is a smoke test, not a benchmark:
+``benchmark_test.py`` owns performance acceptance. Its job is to fail loudly
+when the service is broken, not to notice that a run was 5 % slower.
 """
 
 from __future__ import annotations
@@ -25,6 +45,10 @@ from app.utils import wav_duration_seconds  # noqa: E402
 
 SHORT_TEXT = "Ciao! Questo è un rapido test di sintesi vocale in italiano."
 
+#: A correct render of SHORT_TEXT is a few seconds. Anything under this is a
+#: truncated or empty generation that still returns HTTP 200.
+MIN_PLAUSIBLE_SECONDS = 0.5
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -38,6 +62,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", default=str(settings.paths.output_dir / "test_api.wav"))
     parser.add_argument("--timeout", type=float, default=settings.api.request_timeout_s)
     parser.add_argument("--wait-ready", type=float, default=600.0)
+    parser.add_argument(
+        "--assert",
+        dest="assert_",
+        action="store_true",
+        help=(
+            "Verify the response (WAV magic, plausible duration, sample rate, "
+            "peak VRAM within budget) and exit non-zero on failure. For CI."
+        ),
+    )
     return parser
 
 
@@ -122,6 +155,71 @@ def main(argv: Optional[list[str]] = None) -> int:
     print(f"  x-rtf header     : {response.headers.get('X-RTF')}")
     print(f"  x-peak-vram-mb   : {response.headers.get('X-Peak-Vram-MB')}")
     print(f"  x-sample-rate    : {response.headers.get('X-Sample-Rate')}")
+
+    if not args.assert_:
+        return 0
+    return _assert_response(response, output_path, duration, elapsed)
+
+
+def _assert_response(response, output_path: Path, duration: float, elapsed: float) -> int:
+    """Verify a successful response, printing every failure rather than the first.
+
+    All checks run so one invocation reports the whole picture; only the exit
+    code reflects whether any of them failed.
+    """
+    failures: list[str] = []
+
+    if not response.content:
+        failures.append("empty response body")
+
+    # A 200 carrying something that is not a WAV would otherwise sail through:
+    # an error page or a JSON blob both parse fine as "bytes were returned".
+    if response.content[:4] != b"RIFF" or response.content[8:12] != b"WAVE":
+        failures.append(
+            f"body is not a RIFF/WAVE payload (starts {response.content[:12]!r})"
+        )
+
+    if duration < MIN_PLAUSIBLE_SECONDS:
+        failures.append(
+            f"audio is {duration:.2f}s, too short to be a real render "
+            f"(expected at least {MIN_PLAUSIBLE_SECONDS}s)"
+        )
+
+    expected_rate = settings.processing.target_sample_rate
+    reported_rate = response.headers.get("X-Sample-Rate")
+    if reported_rate is not None and reported_rate.isdigit():
+        if int(reported_rate) != expected_rate:
+            failures.append(
+                f"X-Sample-Rate is {reported_rate}, expected {expected_rate}"
+            )
+    else:
+        failures.append("X-Sample-Rate header missing or not numeric")
+
+    peak = response.headers.get("X-Peak-Vram-MB")
+    limit_mb = settings.model.vram_limit_gb * 1024
+    if peak is None:
+        failures.append("X-Peak-Vram-MB header missing")
+    else:
+        try:
+            peak_mb = float(peak)
+        except ValueError:
+            failures.append(f"X-Peak-Vram-MB is not numeric: {peak!r}")
+        else:
+            if peak_mb > limit_mb:
+                failures.append(
+                    f"peak VRAM {peak_mb:.0f} MB exceeds the "
+                    f"{limit_mb:.0f} MB limit"
+                )
+
+    if failures:
+        print(f"\n[test_api] {len(failures)} assertion(s) failed:", file=sys.stderr)
+        for problem in failures:
+            print(f"  - {problem}", file=sys.stderr)
+        return 1
+
+    print("\n[test_api] all assertions passed")
+    print(f"  rtf               : {elapsed / duration:.4f}" if duration else "")
+    print(f"  peak vram         : {peak} MB / {limit_mb:.0f} MB limit")
     return 0
 
 
