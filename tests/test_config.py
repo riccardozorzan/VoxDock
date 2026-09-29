@@ -9,10 +9,14 @@ mode that makes ``/health``'s ``config_source`` field worth asserting on.
 from __future__ import annotations
 
 import json
+import re
+from pathlib import Path
 
 import pytest
 
 from app.config import ModelSettings, ProcessingSettings, load_best_config
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 # --------------------------------------------------------------------------- #
@@ -175,3 +179,53 @@ def test_nonsense_boolean_is_rejected_loudly(clean_env, monkeypatch):
     monkeypatch.setenv("TTS_OPTIMIZE", "maybe")
     with pytest.raises(ValueError, match="expects a boolean"):
         ModelSettings.from_env()
+
+
+# --------------------------------------------------------------------------- #
+#  The checkpoint is pinned
+#
+#  "Pin dots.tts==0.3.1" was in the README for the Python package; the weights
+#  needed the same treatment, because the verified configuration (2 sampling
+#  steps, a 128-patch budget, 5457 MB peak) describes one specific revision of
+#  the checkpoint. Track a branch and the numbers quietly stop meaning anything.
+# --------------------------------------------------------------------------- #
+def test_the_model_revision_is_pinned_to_a_commit():
+    from app.config import ModelSettings
+
+    revision = ModelSettings().model_revision
+
+    assert revision == "c28105adc8228143392b4e346994ff613ee48a06", (
+        "the pinned revision changed. If that was deliberate, every measured "
+        "number in the README needs re-taking: scripts/benchmark_test.py, then "
+        "the steps A/B in data/output/steps_ab.json."
+    )
+
+
+def test_the_pinned_revision_is_a_sha_and_not_a_branch():
+    from app.config import ModelSettings
+
+    revision = ModelSettings().model_revision
+
+    assert len(revision) == 40, "a branch name is not a pin"
+    assert all(c in "0123456789abcdef" for c in revision)
+
+
+def test_an_operator_can_still_track_main_deliberately(clean_env, monkeypatch):
+    from app.config import ModelSettings
+
+    monkeypatch.setenv("TTS_MODEL_REVISION", "main")
+
+    assert ModelSettings.from_env().model_revision == "main"
+
+
+def test_the_revision_survives_the_environment_and_compose_defaults_agree():
+    """A pin in app/config.py that compose overrides is not a pin."""
+    from app.config import ModelSettings
+
+    compose = (PROJECT_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    match = re.search(
+        r"TTS_MODEL_REVISION:\s*\$\{TTS_MODEL_REVISION:-([0-9a-f]{40})\}", compose
+    )
+
+    assert match is not None, "compose does not forward TTS_MODEL_REVISION"
+    assert match.group(1) == ModelSettings().model_revision

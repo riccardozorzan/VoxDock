@@ -243,6 +243,20 @@ class ModelSettings:
     """dots.tts runtime configuration + the VRAM/RTF acceptance targets."""
 
     model_name_or_path: str = "dots-studio/dots.tts-mf"
+    #: The exact checkpoint revision this configuration was measured against.
+    #:
+    #: Not cosmetic. The verified numbers - 2 sampling steps, a 128-patch
+    #: budget, 5457 MB peak, RTF 0.469 - all come from *this* commit of
+    #: ``dots-studio/dots.tts-mf``. A newer revision can change the model's
+    #: native step count, and a step count the MeanFlow student no longer
+    #: supports would either be rejected or, worse, silently accepted and cost
+    #: double the KV cache and 60 MB of VRAM. The measured configuration stops
+    #: describing reality the moment the weights move underneath it.
+    #:
+    #: Set it to ``main`` to track upstream deliberately; you then own the
+    #: re-measurement, and ``/health`` reports the revision so a drifted install
+    #: is visible from outside.
+    model_revision: str = "c28105adc8228143392b4e346994ff613ee48a06"
     precision: str = "bfloat16"
     optimize: bool = True
     warmup_on_optimize: bool = True
@@ -296,6 +310,7 @@ class ModelSettings:
     def from_env(cls) -> "ModelSettings":
         return cls(
             model_name_or_path=_str("TTS_MODEL_NAME", cls.model_name_or_path),
+            model_revision=_str("TTS_MODEL_REVISION", cls.model_revision),
             precision=_str("TTS_PRECISION", cls.precision),
             optimize=_bool("TTS_OPTIMIZE", cls.optimize),
             warmup_on_optimize=_bool(

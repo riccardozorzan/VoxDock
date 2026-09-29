@@ -48,6 +48,9 @@ services:
     environment:
       # ---- model + runtime ----
       TTS_MODEL_NAME: ${TTS_MODEL_NAME:-dots-studio/dots.tts-mf}
+      # Pinned to the revision every measured number in the README came from.
+      # `main` tracks upstream deliberately and puts re-measurement on you.
+      TTS_MODEL_REVISION: ${TTS_MODEL_REVISION:-c28105adc8228143392b4e346994ff613ee48a06}
       TTS_PRECISION: ${TTS_PRECISION:-bfloat16}
       TTS_OPTIMIZE: ${TTS_OPTIMIZE:-true}
       TTS_WARMUP_ON_OPTIMIZE: ${TTS_WARMUP_ON_OPTIMIZE:-true}

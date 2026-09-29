@@ -119,10 +119,11 @@ def load_runtime() -> dict[str, Any]:
 
     precision = resolve_precision(settings.model.precision)
     logger.info(
-        "Loading checkpoint %s | precision=%s optimize=%s warmup=%s "
+        "Loading checkpoint %s@%s | precision=%s optimize=%s warmup=%s "
         "max_generate_length=%s max_sequence_length=%s patches=%s "
         "(first run downloads ~4.4 GB of weights)",
         settings.model.model_name_or_path,
+        settings.model.model_revision[:12],
         precision,
         settings.model.optimize,
         settings.model.warmup_on_optimize,
@@ -133,6 +134,9 @@ def load_runtime() -> dict[str, Any]:
     started = time.perf_counter()
     runtime = DotsTtsRuntime.from_pretrained(
         settings.model.model_name_or_path,
+        # Pinned so the verified configuration keeps describing the weights it
+        # was measured against. See ModelSettings.model_revision.
+        revision=settings.model.model_revision,
         precision=precision,
         optimize=settings.model.optimize,
         max_generate_length=settings.model.max_generate_length,
@@ -510,6 +514,9 @@ def _model_payload(request: Request) -> dict[str, Any]:
     runtime = getattr(request.app.state, "runtime", None)
     payload: dict[str, Any] = {
         "id": settings.model.model_name_or_path,
+        # Pinned, and reported: "which weights are these?" is the first
+        # question when a measured number stops reproducing.
+        "revision": settings.model.model_revision,
         "loaded": runtime is not None,
         "object": "model",
         "precision": (info or {}).get("precision", settings.model.precision),

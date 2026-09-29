@@ -125,7 +125,9 @@ re-downloaded.
 ├── requirements-dev.txt       # host-side + CI: pytest, ruff, fastapi
 ├── pyproject.toml             # ruff config, so the linter is the same everywhere
 ├── pytest.ini
-├── .github/workflows/ci.yml   # pytest + check_identity.py + ruff on every push
+├── .github/workflows/
+│   ├── ci.yml                # pytest + check_identity.py + ruff on every push
+│   └── ci-docker.yml         # compose validates, image builds, the guard refuses
 ├── LICENSE                    # non-commercial (CC BY-NC 4.0), see section 10
 ├── app/
 │   ├── config.py              # settings: env -> best_config.json -> defaults
@@ -147,7 +149,7 @@ re-downloaded.
 │   ├── test_api.py            # smoke test; --assert for CI
 │   ├── make_reference_set.py  # write the autotuner's reference_set.json
 │   └── fetch_dev_audio.py     # fetch the public ECAPA control clips
-├── tests/                     # 309 host-side tests, no GPU needed (~0.6 s)
+├── tests/                     # 313 host-side tests, no GPU needed (~0.6 s)
 │   ├── conftest.py            # fixtures: isolated env, reloadable config
 │   ├── test_config.py         # the three-tier settings chain
 │   ├── test_speakers.py       # registry CRUD + path-traversal defence
@@ -398,6 +400,7 @@ The most useful knobs:
 | variable | default | meaning |
 |---|---|---|
 | `TTS_MODEL_NAME` | `dots-studio/dots.tts-mf` | checkpoint |
+| `TTS_MODEL_REVISION` | `c28105ad…` | **pinned**; the commit every measured number came from |
 | `TTS_PRECISION` | `bfloat16` | falls back to `float16` if BF16 is unsupported |
 | `TTS_OPTIMIZE` | `true` | `torch.compile` (warmup at load, faster steady state) |
 | `TTS_WARMUP_ON_OPTIMIZE` | `true` | run the compile warmup during startup |

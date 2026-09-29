@@ -1,0 +1,128 @@
+# The deployment itself, not the code.
+#
+# ci.yml proves the host suite; this proves that the thing people actually run
+# still assembles. A Dockerfile that no longer builds, a compose file that no
+# longer parses, or a security guard that stopped refusing are all invisible to
+# a test suite that never invokes Docker - and all three are the kind of break
+# that is discovered on a Sunday.
+#
+# What this CAN and CANNOT verify, stated plainly so the green tick is not
+# over-read:
+#
+#   CAN: the image builds; `docker compose config` resolves; the container
+#        refuses to start when misconfigured; the image really contains the app.
+#   CANNOT: load dots.tts, synthesise audio, or measure VRAM. That needs an
+#        NVIDIA GPU, and GitHub's hosted runners do not have one. A container
+#        that boots with no CUDA device and then fails at model load would test
+#        nothing, so the model is never loaded here.
+#
+# The GPU half is the separate `ci-gpu.yml` workflow, which runs on a
+# self-hosted runner and is expected to be skipped on a fork.
+
+name: ci-docker
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  compose:
+    name: compose config resolves
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate docker-compose.yml
+        run: docker compose config --quiet
+
+      - name: A broken compose file is detected
+        # A guard that cannot fail is not a guard: remove a service and confirm
+        # the step above would have complained.
+        run: |
+          cp docker-compose.yml /tmp/compose.bak
+          sed -i '/^  tts:/,$d' docker-compose.yml
+          if docker compose config --quiet 2>/dev/null; then
+            echo "::error::docker compose accepted a file with the tts service removed"
+            exit 1
+          fi
+          echo "a removed service is correctly rejected"
+          cp /tmp/compose.bak docker-compose.yml
+
+      - name: The deployment identity guard
+        run: python scripts/check_identity.py
+
+  image:
+    name: image builds and holds the app
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the image
+        # No cache layers from a previous run, and no GPU: the base is CUDA
+        # runtime only, and nothing here loads a model.
+        run: docker build -t voxdock-ci:${{ github.sha }} .
+
+      - name: The app is actually in the image
+        # `COPY app ./app` is the line that silently stops matching after a
+        # rename, and the result is a container that starts and then 500s on
+        # every route.
+        run: |
+          docker run --rm --entrypoint python voxdock-ci:${{ github.sha }} -c \
+            "import app, app.security, app.speakers; print('app', app.__version__); print('scopes', sorted(app.security.VALID_SCOPES))"
+
+      - name: The security guard refuses an unauthenticated remote publish
+        # The guard runs before the checkpoint loads, so this needs no GPU and
+        # finishes in seconds. It is the one security behaviour that CI can
+        # check end to end, and the one that matters most: an image that quietly
+        # stopped refusing would publish an open voice cloner to the network.
+        #
+        # `timeout` is not optional. Without the guard firing, this container
+        # would start downloading 4.4 GB of weights and the job would sit there
+        # for ten minutes before GitHub killed it - so a guard that had stopped
+        # working would show up as a timeout rather than as a clear failure.
+        run: |
+          set +e
+          output=$(timeout 120 docker run --rm \
+            -e TTS_PUBLISH_ADDR=0.0.0.0 \
+            voxdock-ci:${{ github.sha }} 2>&1)
+          status=$?
+          set -e
+          echo "$output" | tail -5
+          if [ "$status" -eq 0 ]; then
+            echo "::error::the container started with a remote publish address and no API keys"
+            exit 1
+          fi
+          if ! echo "$output" | grep -q "Refusing to publish"; then
+            echo "::error::the container exited, but not with the exposure guard's message"
+            echo "::error::an operator would have no idea why it would not start"
+            exit 1
+          fi
+          echo "the exposure guard refused to start, as designed"
+
+      - name: The same image gets past the guard once a key is configured
+        # Proves the guard is discriminating rather than refusing everything.
+        # The container is expected to fail *after* this point - it reaches the
+        # checkpoint load, which cannot succeed without a GPU - and the short
+        # timeout is deliberate: reaching the model load is the signal, and
+        # letting it run would pull gigabytes of weights for nothing.
+        run: |
+          set +e
+          output=$(timeout 60 docker run --rm \
+            -e TTS_PUBLISH_ADDR=0.0.0.0 \
+            -e TTS_API_KEYS="ci:sk-ci-0123456789abcdef:tts" \
+            voxdock-ci:${{ github.sha }} 2>&1)
+          status=$?
+          set -e
+          echo "$output" | grep -iE 'Authentication enabled|Loading checkpoint' | head -2 || true
+          if echo "$output" | grep -q "Refusing to publish"; then
+            echo "::error::the guard refused even with a valid API key configured"
+            exit 1
+          fi
+          if ! echo "$output" | grep -qi "Authentication enabled"; then
+            echo "::error::the container never reported loading its keys, so the"
+            echo "::error::run did not get as far as the guard - the test is not"
+            echo "::error::testing what it claims to. Exit status was $status."
+            exit 1
+          fi
+          echo "with keys configured the guard allowed startup (exit $status, expected to fail later without a GPU)"
